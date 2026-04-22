@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@layer base {
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { font-family: 'DM Sans', sans-serif; background: #f8fafc; color: #1a1a2e; -webkit-font-smoothing: antialiased; }
+  h1,h2,h3,h4 { font-family: 'Sora', sans-serif; }
+}
+@layer utilities {
+  .text-gradient { background: linear-gradient(135deg,#38BDF8 0%,#FFB703 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+  .card-hover { transition: transform .25s ease, box-shadow .25s ease; }
+  .card-hover:hover { transform: translateY(-4px); box-shadow: 0 20px 40px rgba(0,0,0,.12); }
+  .btn-primary { @apply bg-ember text-white font-semibold px-6 py-3 rounded-xl hover:bg-orange-600 active:scale-95 transition-all duration-200; }
+  .btn-outline  { @apply border-2 border-sky-accent text-sky-accent font-semibold px-6 py-3 rounded-xl hover:bg-sky-accent hover:text-navy transition-all duration-200; }
+  .inp { @apply w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-sky-accent transition-colors bg-white; }
+  .lbl { @apply block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide; }
+}
