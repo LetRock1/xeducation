@@ -198,11 +198,47 @@ def track_event(body: BehaviourEvent, user=Depends(get_current_user)):
         (user_id, session_id, course_slug, event_type, time_spent_sec)
         VALUES (?,?,?,?,?)
     """, (user["id"], body.session_id, body.course_slug, body.event_type, body.time_spent_sec))
-    # Update session last_active
+
     db.execute(
         "UPDATE user_sessions SET last_active=datetime('now','localtime') WHERE id=?",
         (body.session_id,)
     )
+
+    profile   = db.get_profile(user["id"]) or {}
+    behaviour = db.get_behaviour_summary(user["id"])
+
+    raw = {
+        "LeadOrigin":"Website Interaction",
+        "LeadSource":"Direct Traffic",
+        "DeviceType":"Desktop",
+        "TotalVisits": behaviour["total_visits"],
+        "TotalTimeOnWebsite": behaviour["total_time_on_website"],
+        "PageViewsPerVisit": behaviour["page_views_per_visit"],
+        "SessionsCount": behaviour["sessions_count"],
+        "VideoWatched": behaviour["video_watched"],
+        "BrochureDownloaded": behaviour["brochure_downloaded"],
+        "ChatInitiated": behaviour["chat_initiated"],
+        "PricingPageVisited": behaviour["pricing_page_visited"],
+        "TestimonialVisited": behaviour["testimonial_visited"],
+        "WebinarAttended": behaviour["webinar_attended"],
+        "EmailOpenedCount":0,
+        "CurrentOccupation":profile.get("current_occupation","Unemployed"),
+        "Specialization":profile.get("specialization","Business"),
+        "CourseType":"Browsing",
+        "City":profile.get("city","Unknown"),
+        "Country":profile.get("country","India"),
+        "AgeBracket":profile.get("age_bracket"),
+        "HowDidYouHear":profile.get("how_did_you_hear","Unknown"),
+        "DoNotEmail":profile.get("do_not_email","No"),
+        "DoNotCall":profile.get("do_not_call","No"),
+        "WhatsAppOptIn":profile.get("whatsapp_opt_in",0),
+        "wishlist_count": len(db.get_wishlist(user["id"])),
+        "past_purchases": len(db.get_purchases(user["id"])),
+    }
+
+    from predict import create_or_update_lead_snapshot
+    create_or_update_lead_snapshot(user["id"], raw)
+
     return {"tracked": True}
 
 @app.post("/api/session/start")

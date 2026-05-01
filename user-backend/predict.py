@@ -145,3 +145,24 @@ def predict_lead(raw: dict) -> dict:
         "customer_segment":       segment,
         "recommended_action":     action,
     }
+
+
+def create_or_update_lead_snapshot(user_id: int, raw: dict):
+    pred = predict_lead(raw)
+    import database as db
+    db.execute("""
+        INSERT INTO leads (
+            user_id, course_type, lead_score, conversion_probability,
+            persona, customer_segment, recommended_action, trigger_reason
+        ) VALUES (?,?,?,?,?,?,?,?)
+    """, (
+        user_id,
+        raw.get("CourseType","Browsing"),
+        pred["lead_score"],
+        pred["conversion_probability"],
+        pred["persona"],
+        pred["customer_segment"],
+        pred["recommended_action"],
+        "behaviour_snapshot"
+    ))
+    return pred

@@ -348,3 +348,88 @@ def mark_coupon_used(coupon_id):
         UPDATE coupons_issued SET used=1, used_at=datetime('now','localtime')
         WHERE id=?
     """, (coupon_id,))
+
+
+
+# ============================================================
+# SCHEDULER SUPPORT FUNCTIONS (NEW)
+# ============================================================
+
+def get_abandoned_carts(minutes=60):
+    """
+    Cart items where user added course but didn't purchase
+    within X minutes.
+    """
+    return fetchall("""
+        SELECT 
+            c.id as cart_id,
+            c.user_id,
+            c.course_slug,
+            c.course_title,
+            c.price,
+            c.added_at,
+            u.email,
+            u.name
+        FROM cart c
+        JOIN users u ON u.id = c.user_id
+        WHERE c.abandon_email_sent = 0
+        AND c.added_at <= datetime('now','localtime', ?)
+    """, (f"-{minutes} minutes",))
+
+
+def mark_cart_email_sent(cart_id):
+    execute(
+        "UPDATE cart SET abandon_email_sent=1 WHERE id=?",
+        (cart_id,)
+    )
+
+
+def get_inactive_users(minutes=15):
+    """
+    Users whose last session activity is older than X minutes.
+    """
+    return fetchall("""
+        SELECT 
+            u.id as user_id,
+            u.email,
+            u.name,
+            MAX(s.last_active) as last_seen
+        FROM users u
+        JOIN user_sessions s ON s.user_id = u.id
+        GROUP BY u.id
+        HAVING last_seen <= datetime('now','localtime', ?)
+    """, (f"-{minutes} minutes",))
+
+
+def get_users_with_old_wishlist(minutes=30):
+    """
+    Users who added wishlist items but did not purchase.
+    """
+    return fetchall("""
+        SELECT 
+            w.user_id,
+            u.email,
+            u.name,
+            MIN(w.added_at) as first_added
+        FROM wishlist w
+        JOIN users u ON u.id = w.user_id
+        LEFT JOIN purchases p 
+            ON p.user_id = w.user_id 
+            AND p.course_slug = w.course_slug
+        WHERE p.id IS NULL
+        GROUP BY w.user_id
+        HAVING first_added <= datetime('now','localtime', ?)
+    """, (f"-{minutes} minutes",))
+
+
+def recent_lead_exists(user_id, trigger, hours=6):
+    """
+    Prevent duplicate leads within cooldown window.
+    """
+    row = fetchone("""
+        SELECT id FROM leads
+        WHERE user_id=? AND trigger_reason=?
+        AND created_at >= datetime('now','localtime', ?)
+        LIMIT 1
+    """, (user_id, trigger, f"-{hours} hours"))
+    return row is not None
