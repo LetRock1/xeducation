@@ -25,10 +25,10 @@ export default function QnAPage() {
     setSending(p => ({ ...p, [qid]: true }))
     try {
       await answerQnA({ qna_id: qid, answer: answers[qid] })
-      setResults(p => ({ ...p, [qid]: '✅ Answer published!' }))
+      setResults(p => ({ ...p, [qid]: 'Done Answer published!' }))
       setTimeout(() => load(), 1200)
     } catch {
-      setResults(p => ({ ...p, [qid]: '❌ Failed to publish. Try again.' }))
+      setResults(p => ({ ...p, [qid]: 'Error Failed to publish. Try again.' }))
     } finally {
       setSending(p => ({ ...p, [qid]: false }))
     }
@@ -53,7 +53,7 @@ export default function QnAPage() {
         </div>
       ) : !questions.length ? (
         <div className="card p-16 text-center">
-          <p className="text-4xl mb-3">🎉</p>
+          <p className="text-4xl mb-3">Great!</p>
           <p className="text-white font-display font-bold text-lg mb-1">All caught up!</p>
           <p className="text-slate-500 text-sm">Every question has been answered.</p>
         </div>
@@ -80,7 +80,7 @@ export default function QnAPage() {
               {/* Question */}
               <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 mb-4">
                 <p className="text-slate-300 text-sm leading-relaxed">
-                  🙋 {q.question}
+                   {q.question}
                 </p>
               </div>
 
@@ -95,7 +95,7 @@ export default function QnAPage() {
 
               {results[q.id] && (
                 <p className={`text-sm mb-3 px-3 py-2 rounded-xl border ${
-                  results[q.id].startsWith('✅')
+                  results[q.id].startsWith('Done')
                     ? 'text-green-400 bg-green-900/20 border-green-800/30'
                     : 'text-red-400 bg-red-900/20 border-red-800/30'}`}>
                   {results[q.id]}
@@ -106,7 +106,7 @@ export default function QnAPage() {
                 onClick={() => publish(q.id)}
                 disabled={sending[q.id] || !answers[q.id]?.trim()}
                 className="btn text-sm disabled:opacity-50">
-                {sending[q.id] ? '⏳ Publishing…' : '✅ Publish Answer'}
+                {sending[q.id] ? '⏳ Publishing…' : 'Done Publish Answer'}
               </button>
             </div>
           ))}

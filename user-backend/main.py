@@ -323,7 +323,7 @@ def checkout(body: CheckoutRequest, user=Depends(get_current_user)):
         db.mark_coupon_used(coupon_id)
 
     return {
-        "message": "Purchase successful! 🎉 Welcome to X Education.",
+        "message": "Purchase successful! Great! Welcome to X Education.",
         "courses_purchased": purchased,
         "discount_applied": f"{discount_pct}%" if discount_pct else "None",
     }
@@ -414,12 +414,14 @@ def submit_enquiry(body: EnquiryRequest, user=Depends(get_current_user)):
 
     # Issue coupon if applicable
     if content["coupon_code"]:
-        discount = 25 if "25" in content["coupon_code"] else 15 if "15" in content["coupon_code"] else 10
-        db.execute("""
-            INSERT OR IGNORE INTO coupons_issued
-            (user_id, coupon_code, discount_pct, tier, expires_at)
-            VALUES (?,?,?,?,datetime('now','localtime','+72 hours'))
-        """, (user["id"], content["coupon_code"], discount, prediction["recommended_action"]))
+        _DISCOUNTS = {"VIP_URGENT_25": 25, "FUTURE_READY_15": 15, "EARLY_BIRD_10": 10, "LOYAL_20": 20}
+        discount = _DISCOUNTS.get(content["coupon_code"], 0)
+        if discount > 0:
+            db.execute("""
+                INSERT OR IGNORE INTO coupons_issued
+                (user_id, coupon_code, discount_pct, tier, expires_at)
+                VALUES (?,?,?,?,datetime('now','localtime','+72 hours'))
+            """, (user["id"], content["coupon_code"], discount, prediction["recommended_action"]))
 
     # Send confirmation email
     if profile.get("do_not_email") != "Yes":
@@ -498,3 +500,20 @@ def get_coupons(user=Depends(get_current_user)):
     return {"coupons": db.fetchall(
         "SELECT * FROM coupons_issued WHERE user_id=? ORDER BY created_at DESC", (user["id"],)
     )}
+
+
+# ── DEBUG / DEMO ENDPOINT ─────────────────────────────────────────────────────
+# For demo only: manually trigger background jobs without waiting 15 min/1 hr.
+# Remove this in production.
+@app.post("/api/debug/trigger-jobs")
+def trigger_jobs_manually():
+    """
+    Manually runs cart_abandonment_job + session_end_job.
+    Use this during your demo instead of waiting 15 minutes.
+    Open Postman / curl:
+      POST http://localhost:8000/api/debug/trigger-jobs
+    """
+    from scheduler import cart_abandonment_job, session_end_job
+    cart_abandonment_job()
+    session_end_job()
+    return {"message": "Both jobs triggered manually. Check marketing dashboard."}

@@ -37,8 +37,8 @@ export default function LeadDetail() {
       setSubject(r.data.improved_subject)
       setBody(r.data.improved_body)
       setSmsMsg(r.data.whatsapp_message)
-      setMsg('✅ AI has improved the email content. Review before sending.')
-    } catch { setMsg('❌ AI improve failed') }
+      setMsg(' AI has improved the email content. Review before sending.')
+    } catch { setMsg(' AI improve failed') }
     finally { setImproving(false) }
   }
 
@@ -46,9 +46,9 @@ export default function LeadDetail() {
     setSending(true); setMsg('')
     try {
       const r = await sendEmail({ lead_id: Number(id), subject, body })
-      setMsg(r.data.success ? '✅ ' + r.data.message : '❌ ' + r.data.message)
+      setMsg(r.data.success ? ' ' + r.data.message : ' ' + r.data.message)
       if (r.data.success) setLead(l => ({...l, email_sent:1}))
-    } catch(e) { setMsg('❌ ' + (e.response?.data?.detail || 'Error')) }
+    } catch(e) { setMsg(' ' + (e.response?.data?.detail || 'Error')) }
     finally { setSending(false) }
   }
 
@@ -56,8 +56,8 @@ export default function LeadDetail() {
     setSmsBusy(true)
     try {
       await queueSms({ user_id: lead.user_id, phone: lead.phone || 'N/A', message: smsMsg })
-      setSmsResult('✅ SMS queued (mock mode — configure Fast2SMS API to send real messages)')
-    } catch { setSmsResult('❌ Failed to queue SMS') }
+      setSmsResult(' SMS queued (mock mode — configure Fast2SMS API to send real messages)')
+    } catch { setSmsResult(' Failed to queue SMS') }
     finally { setSmsBusy(false) }
   }
 
@@ -67,8 +67,8 @@ export default function LeadDetail() {
     const disc = discounts[lead?.recommended_action] || 10
     try {
       const r = await generateCoupon({ user_id: lead.user_id, tier: lead.recommended_action, discount_pct: disc })
-      setCouponResult(`✅ Coupon ${r.data.coupon_code} (${r.data.discount_pct}% off) assigned to user.`)
-    } catch(e) { setCouponResult('❌ ' + (e.response?.data?.detail || 'Error')) }
+      setCouponResult(` Coupon ${r.data.coupon_code} (${r.data.discount_pct}% off) assigned to user.`)
+    } catch(e) { setCouponResult(' ' + (e.response?.data?.detail || 'Error')) }
     finally { setCouponBusy(false) }
   }
 
@@ -101,7 +101,7 @@ export default function LeadDetail() {
             ['Segment',    lead.customer_segment],
             ['Trigger',    lead.trigger_reason],
             ['Conv. Prob.',`${((lead.conversion_probability||0)*100).toFixed(1)}%`],
-            ['WhatsApp',   lead.whatsapp_opt_in ? '✓ Opted In' : '—'],
+            ['WhatsApp',   lead.whatsapp_opt_in ? 'Yes Opted In' : '—'],
             ['Coupon',     lead.coupon_code || '—'],
           ].map(([k,v]) => v && (
             <div key={k} className="flex gap-2">
@@ -111,7 +111,7 @@ export default function LeadDetail() {
           ))}
           {lead.call_script && (
             <div className="mt-4 pt-4 border-t border-white/10">
-              <p className="text-slate-500 text-xs font-semibold uppercase tracking-wide mb-2">📞 Call Script</p>
+              <p className="text-slate-500 text-xs font-semibold uppercase tracking-wide mb-2">Phone: Call Script</p>
               <p className="text-slate-300 text-xs leading-relaxed italic">{lead.call_script}</p>
             </div>
           )}
@@ -121,7 +121,7 @@ export default function LeadDetail() {
         <div className="lg:col-span-2 space-y-4">
           {/* Tab selector */}
           <div className="flex gap-2">
-            {[['email','✉️ Email'],['sms','💬 SMS/WhatsApp'],['behaviour','📊 Behaviour'],['coupon','🎁 Coupon']].map(([key,label]) => (
+            {[['email',' Email'],['sms',' SMS/WhatsApp'],['behaviour',' Behaviour'],['coupon',' Coupon']].map(([key,label]) => (
               <button key={key} onClick={() => setTab(key)}
                 className={`px-4 py-2 rounded-xl text-sm font-medium transition-all
                   ${tab===key?'bg-ember text-white':'bg-white/5 border border-white/10 text-slate-400 hover:border-white/30'}`}>
@@ -137,7 +137,7 @@ export default function LeadDetail() {
                 <h3 className="font-display font-semibold text-white">Email Editor</h3>
                 <button onClick={handleImprove} disabled={improving}
                   className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-sm font-medium transition-all disabled:opacity-60">
-                  {improving ? '⏳ Improving…' : '✨ Improve with AI'}
+                  {improving ? ' Improving…' : ' Improve with AI'}
                 </button>
               </div>
               <div>
@@ -150,10 +150,10 @@ export default function LeadDetail() {
               </div>
               {msg && <p className="text-sm">{msg}</p>}
               {lead.email_sent
-                ? <p className="text-green-400 text-sm font-semibold text-center">✅ Email already sent · {lead.email_sent_at}</p>
+                ? <p className="text-green-400 text-sm font-semibold text-center"> Email already sent · {lead.email_sent_at}</p>
                 : <button onClick={handleSend} disabled={sending}
                     className="w-full btn disabled:opacity-60">
-                    {sending ? '⏳ Sending…' : '📤 Send Email to Lead'}
+                    {sending ? ' Sending…' : ' Send Email to Lead'}
                   </button>
               }
             </div>
@@ -169,13 +169,13 @@ export default function LeadDetail() {
                 <p className="text-slate-600 text-xs mt-1">{smsMsg.length} characters</p>
               </div>
               <div className="bg-white/5 border border-white/10 rounded-xl p-4 text-xs text-slate-400">
-                <p className="font-semibold text-slate-300 mb-1">📱 Send to: {lead.phone || 'No phone on file'}</p>
-                <p>WhatsApp opt-in: {lead.whatsapp_opt_in ? '✓ Yes' : '✗ No'}</p>
+                <p className="font-semibold text-slate-300 mb-1"> Send to: {lead.phone || 'No phone on file'}</p>
+                <p>WhatsApp opt-in: {lead.whatsapp_opt_in ? 'Yes Yes' : 'No No'}</p>
               </div>
               {smsResult && <p className="text-sm">{smsResult}</p>}
               <button onClick={handleSms} disabled={smsBusy}
                 className="w-full btn disabled:opacity-60">
-                {smsBusy ? '⏳ Queuing…' : '📱 Queue SMS (Mock)'}
+                {smsBusy ? ' Queuing…' : ' Queue SMS (Mock)'}
               </button>
               <p className="text-slate-600 text-xs text-center">To send real SMS, configure Fast2SMS or MSG91 API in marketing-backend/.env</p>
             </div>
@@ -193,12 +193,12 @@ export default function LeadDetail() {
                   ['Sessions',       lead.sessions_count],
                   ['Emails Opened',  lead.email_opened_count],
                   ['Lead Source',    lead.lead_source || '—'],
-                  ['Video',          lead.video_watched    ?'✓ Yes':'—'],
-                  ['Brochure',       lead.brochure_downloaded?'✓ Yes':'—'],
-                  ['Chat',           lead.chat_initiated   ?'✓ Yes':'—'],
-                  ['Pricing Page',   lead.pricing_page_visited?'✓ Yes':'—'],
-                  ['Testimonial',    lead.testimonial_visited?'✓ Yes':'—'],
-                  ['Webinar',        lead.webinar_attended ?'✓ Yes':'—'],
+                  ['Video',          lead.video_watched    ?'Yes Yes':'—'],
+                  ['Brochure',       lead.brochure_downloaded?'Yes Yes':'—'],
+                  ['Chat',           lead.chat_initiated   ?'Yes Yes':'—'],
+                  ['Pricing Page',   lead.pricing_page_visited?'Yes Yes':'—'],
+                  ['Testimonial',    lead.testimonial_visited?'Yes Yes':'—'],
+                  ['Webinar',        lead.webinar_attended ?'Yes Yes':'—'],
                 ].map(([k,v]) => (
                   <div key={k} className="bg-white/5 rounded-xl px-3 py-2.5">
                     <p className="text-slate-500 text-xs">{k}</p>
@@ -240,7 +240,7 @@ export default function LeadDetail() {
                   <p className="text-slate-500 text-xs">The coupon will be assigned to this user's account. It will appear when they log in and must be entered manually at checkout. Send it via email to notify them.</p>
                   {couponResult && <p className="text-sm">{couponResult}</p>}
                   <button onClick={handleCoupon} disabled={couponBusy} className="w-full btn disabled:opacity-60">
-                    {couponBusy ? '⏳ Generating…' : '🎁 Generate & Assign Coupon'}
+                    {couponBusy ? ' Generating…' : ' Generate & Assign Coupon'}
                   </button>
                 </>
               )}

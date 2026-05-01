@@ -3,11 +3,11 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { getLeads } from '../utils/api'
 
 const TIERS = [
-  { key:null,                         label:'All',       icon:'📋' },
-  { key:'Target Immediately',         label:'Target Now',icon:'🔴' },
-  { key:'Nurture via Email/WhatsApp', label:'Nurture',   icon:'🟠' },
-  { key:'Marketing Campaign',         label:'Campaign',  icon:'🟡' },
-  { key:'Low Priority',               label:'Low Prio',  icon:'⚪' },
+  { key:null,                         label:'All',       icon:'' },
+  { key:'Target Immediately',         label:'Target Now',icon:'' },
+  { key:'Nurture via Email/WhatsApp', label:'Nurture',   icon:'' },
+  { key:'Marketing Campaign',         label:'Campaign',  icon:'' },
+  { key:'Low Priority',               label:'Low Prio',  icon:'' },
 ]
 const SC = s => s>=80?'text-red-400 bg-red-900/20':s>=60?'text-orange-400 bg-orange-900/20':s>=40?'text-yellow-400 bg-yellow-900/20':'text-slate-400 bg-slate-800'
 const TC = a => a==='Target Immediately'?'bg-red-900/30 text-red-400':a==='Nurture via Email/WhatsApp'?'bg-orange-900/30 text-orange-400':a==='Marketing Campaign'?'bg-yellow-900/30 text-yellow-400':'bg-slate-800 text-slate-400'
@@ -56,7 +56,7 @@ export default function Leads() {
             </thead>
             <tbody className="divide-y divide-white/5">
               {loading
-                ? <tr><td colSpan={8} className="text-center py-12 text-slate-500">⏳ Loading leads…</td></tr>
+                ? <tr><td colSpan={8} className="text-center py-12 text-slate-500"> Loading leads…</td></tr>
                 : !leads.length
                 ? <tr><td colSpan={8} className="text-center py-12 text-slate-500">No leads found.</td></tr>
                 : leads.map(l => (
@@ -77,7 +77,7 @@ export default function Leads() {
                     </td>
                     <td className="px-4 py-3.5 text-slate-500 text-xs">{l.trigger_reason}</td>
                     <td className="px-4 py-3.5 text-center text-xs">
-                      {l.email_sent?<span className="text-green-400">✓ Sent</span>:<span className="text-slate-600">Pending</span>}
+                      {l.email_sent?<span className="text-green-400">Yes Sent</span>:<span className="text-slate-600">Pending</span>}
                     </td>
                     <td className="px-4 py-3.5 text-center">
                       <Link to={`/leads/${l.id}`} className="text-sky-accent text-xs hover:underline">View →</Link>
