@@ -130,11 +130,24 @@ def verify_otp(body: OTPVerifyRequest):
     if not user:
         raise HTTPException(404, "User not found")
     db.execute("UPDATE users SET is_verified=1 WHERE email=?", (body.email,))
+
     # Create empty profile
     db.execute("INSERT OR IGNORE INTO user_profiles (user_id) VALUES (?)", (user["id"],))
+
+    # Create a session immediately so tracking works after signup
+    session_id = db.execute(
+        "INSERT INTO user_sessions (user_id, device_type) VALUES (?,?)",
+        (user["id"], "Desktop")
+    )
+
     token = auth.create_token(user["id"], user["email"])
-    return {"token": token, "user": {"id": user["id"], "name": user["name"], "email": user["email"]},
-            "profile_complete": False, "message": "Email verified! Welcome to X Education."}
+    return {
+        "token": token,
+        "session_id": session_id,   # NEW: send session id
+        "user": {"id": user["id"], "name": user["name"], "email": user["email"]},
+        "profile_complete": False,
+        "message": "Email verified! Welcome to X Education."
+    }
 
 @app.post("/api/auth/login")
 def login(body: LoginRequest):
@@ -193,17 +206,20 @@ def update_preferences(body: dict, user=Depends(get_current_user)):
 # ── BEHAVIOUR TRACKING ────────────────────────────────────────────────────────
 @app.post("/api/track")
 def track_event(body: BehaviourEvent, user=Depends(get_current_user)):
+    # 1. Insert the raw event
     db.execute("""
         INSERT INTO behaviour_events
         (user_id, session_id, course_slug, event_type, time_spent_sec)
         VALUES (?,?,?,?,?)
     """, (user["id"], body.session_id, body.course_slug, body.event_type, body.time_spent_sec))
 
+    # 2. Update session last_active
     db.execute(
         "UPDATE user_sessions SET last_active=datetime('now','localtime') WHERE id=?",
         (body.session_id,)
     )
 
+    # 3. Gather data for ML scoring
     profile   = db.get_profile(user["id"]) or {}
     behaviour = db.get_behaviour_summary(user["id"])
 
@@ -236,10 +252,72 @@ def track_event(body: BehaviourEvent, user=Depends(get_current_user)):
         "past_purchases": len(db.get_purchases(user["id"])),
     }
 
-    from predict import create_or_update_lead_snapshot
-    create_or_update_lead_snapshot(user["id"], raw)
+    # 4. ML prediction (NO lead creation)
+    from predict import predict_lead
+    pred = predict_lead(raw)
 
-    return {"tracked": True}
+    # 5. Update LIVE state table (visible only to user dashboard)
+    db.execute("""
+        INSERT INTO live_user_state (user_id, live_score, persona, updated_at)
+        VALUES (?, ?, ?, datetime('now','localtime'))
+        ON CONFLICT(user_id) DO UPDATE SET
+            live_score = excluded.live_score,
+            persona    = excluded.persona,
+            updated_at = excluded.updated_at
+    """, (user["id"], pred["lead_score"], pred["persona"]))
+
+    # 6. Return live score to frontend (optional, frontend can also call /live-score)
+    return {
+        "tracked": True,
+        "live_score": pred["lead_score"],
+        "persona": pred["persona"]
+    }
+
+@app.get("/api/live-score")
+def get_live_score(user=Depends(get_current_user)):
+    row = db.fetchone("SELECT live_score, persona FROM live_user_state WHERE user_id=?", (user["id"],))
+    if row:
+        return {"lead_score": row["live_score"], "persona": row["persona"]}
+    
+    # Fallback: compute a base score from current profile + behaviour
+    profile   = db.get_profile(user["id"]) or {}
+    behaviour = db.get_behaviour_summary(user["id"])
+    raw = {
+        "LeadOrigin":"Website Interaction",
+        "LeadSource":"Direct Traffic",
+        "DeviceType":"Desktop",
+        "TotalVisits": behaviour["total_visits"],
+        "TotalTimeOnWebsite": behaviour["total_time_on_website"],
+        "PageViewsPerVisit": behaviour["page_views_per_visit"],
+        "SessionsCount": behaviour["sessions_count"],
+        "VideoWatched": behaviour["video_watched"],
+        "BrochureDownloaded": behaviour["brochure_downloaded"],
+        "ChatInitiated": behaviour["chat_initiated"],
+        "PricingPageVisited": behaviour["pricing_page_visited"],
+        "TestimonialVisited": behaviour["testimonial_visited"],
+        "WebinarAttended": behaviour["webinar_attended"],
+        "EmailOpenedCount":0,
+        "CurrentOccupation":profile.get("current_occupation","Unemployed"),
+        "Specialization":profile.get("specialization","Business"),
+        "CourseType":"Browsing",
+        "City":profile.get("city","Unknown"),
+        "Country":profile.get("country","India"),
+        "AgeBracket":profile.get("age_bracket"),
+        "HowDidYouHear":profile.get("how_did_you_hear","Unknown"),
+        "DoNotEmail":profile.get("do_not_email","No"),
+        "DoNotCall":profile.get("do_not_call","No"),
+        "WhatsAppOptIn":profile.get("whatsapp_opt_in",0),
+        "wishlist_count": len(db.get_wishlist(user["id"])),
+        "past_purchases": len(db.get_purchases(user["id"])),
+    }
+    pred = predict_lead(raw)
+    db.execute("""
+        INSERT INTO live_user_state (user_id, live_score, persona)
+        VALUES (?,?,?)
+        ON CONFLICT(user_id) DO UPDATE SET live_score=excluded.live_score, persona=excluded.persona
+    """, (user["id"], pred["lead_score"], pred["persona"]))
+    return {"lead_score": pred["lead_score"], "persona": pred["persona"]}
+
 
 @app.post("/api/session/start")
 def start_session(body: dict, user=Depends(get_current_user)):

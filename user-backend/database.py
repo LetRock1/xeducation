@@ -178,6 +178,14 @@ def init_db():
         created_at   TEXT DEFAULT (datetime('now','localtime'))
     )""")
 
+
+    c.execute("""CREATE TABLE IF NOT EXISTS live_user_state (
+    user_id       INTEGER PRIMARY KEY REFERENCES users(id),
+    live_score    REAL,
+    persona       TEXT,
+    updated_at    TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+
     conn.commit()
     conn.close()
     print(f"[DB] Initialised → {DB_PATH}")

@@ -27,7 +27,7 @@ export default function Signup() {
     e.preventDefault(); setError(''); setLoading(true)
     try {
       const r = await verifyOtp({ email: form.email, otp })
-      login(r.data.token, r.data.user, null)
+      login(r.data.token, r.data.user, r.data.session_id || null)
       navigate('/complete-profile', { replace: true })
     } catch(err) { setError(err.response?.data?.detail || 'Invalid OTP') }
     finally { setLoading(false) }

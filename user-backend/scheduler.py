@@ -15,8 +15,8 @@ COOLDOWN_WISHLIST_HOURS = 24
 # ============================================================
 DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
 SESSION_INACTIVE_MINUTES = 1 if DEMO_MODE else 15
-CART_ABANDON_MINUTES = 2 if DEMO_MODE else 60
-WISHLIST_DELAY_MINUTES = 2 if DEMO_MODE else 30
+CART_ABANDON_MINUTES = 1 if DEMO_MODE else 60
+WISHLIST_DELAY_MINUTES = 1 if DEMO_MODE else 30
 
 
 # ============================================================
@@ -59,19 +59,64 @@ def _build_raw(user_id, profile, behaviour, course_title,
 
 
 def _save_lead(user_id, raw, pred, content, trigger):
+    profile = db.get_profile(user_id) or {}
     db.execute("""
         INSERT INTO leads (
-            user_id, course_type, lead_score, conversion_probability,
-            persona, customer_segment, recommended_action,
-            email_subject, email_body, whatsapp_message, coupon_code, trigger_reason
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            user_id, lead_origin, lead_source, device_type,
+            total_visits, total_time_on_website, page_views_per_visit,
+            sessions_count, video_watched, brochure_downloaded, chat_initiated,
+            pricing_page_visited, testimonial_visited, webinar_attended, email_opened_count,
+            course_type, lead_score, conversion_probability, persona,
+            customer_segment, recommended_action,
+            email_subject, email_body, whatsapp_message, coupon_code, call_script,
+            trigger_reason
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
-        user_id, raw["CourseType"], pred["lead_score"], pred["conversion_probability"],
-        pred["persona"], pred["customer_segment"], pred["recommended_action"],
-        content["email_subject"], content["email_body"], content["whatsapp_message"],
-        content["coupon_code"], trigger
+        user_id,
+        raw.get("LeadOrigin", ""),
+        raw.get("LeadSource", ""),
+        raw.get("DeviceType", ""),
+        raw.get("TotalVisits", 1),
+        raw.get("TotalTimeOnWebsite", 0),
+        raw.get("PageViewsPerVisit", 1.0),
+        raw.get("SessionsCount", 1),
+        raw.get("VideoWatched", 0),
+        raw.get("BrochureDownloaded", 0),
+        raw.get("ChatInitiated", 0),
+        raw.get("PricingPageVisited", 0),
+        raw.get("TestimonialVisited", 0),
+        raw.get("WebinarAttended", 0),
+        raw.get("EmailOpenedCount", 0),
+        raw.get("CourseType", "Browsing"),
+        pred["lead_score"],
+        pred["conversion_probability"],
+        pred["persona"],
+        pred["customer_segment"],
+        pred["recommended_action"],
+        content["email_subject"],
+        content["email_body"],
+        content["whatsapp_message"],
+        content["coupon_code"],
+        content["call_script"],
+        trigger
     ))
 
+    # ── NEW: Also issue the coupon into coupons_issued ──────────────────
+    if content["coupon_code"]:
+        _DISCOUNTS = {
+            "VIP_URGENT_25": 25,
+            "FUTURE_READY_15": 15,
+            "EARLY_BIRD_10": 10,
+            "LOYAL_20": 20,
+            "LAST_CHANCE_30": 30    # if you add it later
+        }
+        discount = _DISCOUNTS.get(content["coupon_code"], 0)
+        if discount > 0:
+            db.execute("""
+                INSERT OR IGNORE INTO coupons_issued
+                (user_id, coupon_code, discount_pct, tier, expires_at)
+                VALUES (?,?,?,?,datetime('now','localtime','+72 hours'))
+            """, (user_id, content["coupon_code"], discount, pred["recommended_action"]))
 
 # ============================================================
 # 🛒 CART ABANDONMENT JOB
@@ -138,21 +183,28 @@ def session_end_job():
             profile = db.get_profile(user_id) or {}
             behaviour = db.get_behaviour_summary(user_id)
 
-            raw = _build_raw(user_id, profile, behaviour, "Browsing")
+            # Use the course the user actually engaged with
+            top_course_slug = behaviour.get("top_course_slug")
+            course_title = "Browsing"
+            if top_course_slug:
+                course_title = top_course_slug.replace("-", " ").title()
+
+            raw = _build_raw(user_id, profile, behaviour, course_title)
             pred = predict_lead(raw)
 
+            # For GenAI content, pass the actual course name so email is relevant
             content = generate_content(
                 name=user["name"],
-                occupation=profile.get("current_occupation","Professional"),
-                specialization=profile.get("specialization","your field"),
-                course="our programmes",
+                occupation=profile.get("current_occupation", "Professional"),
+                specialization=profile.get("specialization", "your field"),
+                course=course_title,
                 action=pred["recommended_action"],
                 trigger="session_end",
                 past_purchases=0,
             )
 
             _save_lead(user_id, raw, pred, content, "session_end")
-            print(f"[SESSION JOB] Lead created → {user['email']}")
+            print(f"[SESSION JOB] Lead created → {user['email']} for course '{course_title}'")
 
     except Exception as e:
         print("[SESSION JOB ERROR]", e)

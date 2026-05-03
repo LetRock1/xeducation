@@ -73,11 +73,6 @@ def _engineer(row: pd.DataFrame) -> pd.DataFrame:
 
 
 def _business_rules(score: float, raw: dict) -> tuple[float, str]:
-    """
-    Apply Business Rules on top of ML score.
-    Handles new signals not in the trained model.
-    Returns (adjusted_score, action)
-    """
     adjusted = score
 
     # Enquiry submitted → always at least Marketing Campaign
@@ -92,8 +87,19 @@ def _business_rules(score: float, raw: dict) -> tuple[float, str]:
     if raw.get("wishlist_count", 0) > 0:
         adjusted = min(adjusted + 5.0, 100.0)
 
-    # Past purchase → loyalty treatment (separate flag, not score change)
-    # Handled downstream in genai content
+    # 👇 NEW: Occupation-based dampening for low-conversion profiles
+    occupation = raw.get("CurrentOccupation", "")
+    low_conv_occupations = ["Student", "Unemployed", "Housewife"]
+    if occupation in low_conv_occupations:
+        # Allow full score only if cart abandoned or enquiry submitted
+        if not raw.get("cart_abandoned") and not raw.get("enquiry_submitted"):
+            # Cap the score to a max of 72 for these occupations
+            adjusted = min(adjusted, 72.0)
+            # Optionally reduce the score slightly to keep it believable
+            adjusted = adjusted * 0.85   # 15% reduction for low-conv occupations
+
+    # Clip to valid range
+    adjusted = max(0.0, min(100.0, adjusted))
 
     if   adjusted >= 80: action = "Target Immediately"
     elif adjusted >= 60: action = "Nurture via Email/WhatsApp"

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link }                from 'react-router-dom'
-import { getDashboard, removeFromWishlist } from '../utils/api'
+import { getDashboard, getLiveScore, removeFromWishlist } from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 
 function ScoreRing({ score }) {
@@ -23,16 +23,28 @@ function ScoreRing({ score }) {
 
 export default function UserDashboard() {
   const { user, profile } = useAuth()
-  const [data,    setData]    = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [data,       setData]       = useState(null)
+  const [liveScore,  setLiveScore]  = useState(null)
+  const [persona,    setPersona]    = useState(null)
+  const [loading,    setLoading]    = useState(true)
 
+  // Fetch main dashboard data (cart, wishlist, purchases, coupons)
   const load = () =>
     getDashboard()
       .then(r => setData(r.data))
       .catch(() => {})
       .finally(() => setLoading(false))
 
-  useEffect(() => { load() }, [])
+  // Fetch live score separately
+  useEffect(() => {
+    load()
+    getLiveScore()
+      .then(r => {
+        setLiveScore(r.data.lead_score)
+        setPersona(r.data.persona)
+      })
+      .catch(() => {})
+  }, [])
 
   async function removeWishlist(slug) {
     await removeFromWishlist(slug).catch(() => {})
@@ -45,7 +57,8 @@ export default function UserDashboard() {
     </div>
   )
 
-  const score = data?.lead_score ? Math.round(data.lead_score) : null
+  // Use live score if available, otherwise fallback to null
+  const score = liveScore !== null ? Math.round(liveScore) : null
 
   return (
     <main className="min-h-screen bg-slate-50 pt-20 pb-16">
@@ -61,12 +74,12 @@ export default function UserDashboard() {
               {profile?.current_occupation || 'Complete your profile to get started'}
             </p>
           </div>
-          {score && (
+          {score !== null && (
             <div className="flex items-center gap-4 bg-white border border-slate-200 rounded-2xl px-5 py-3">
               <ScoreRing score={score} />
               <div>
-                <p className="font-display font-bold text-navy text-sm">Lead Score</p>
-                <p className="text-slate-500 text-xs">{data?.persona}</p>
+                <p className="font-display font-bold text-navy text-sm">Live Lead Score</p>
+                <p className="text-slate-500 text-xs">{persona || 'Calculating…'}</p>
               </div>
             </div>
           )}
@@ -84,8 +97,7 @@ export default function UserDashboard() {
               </p>
             </div>
             <Link to="/cart"
-              className="bg-ember hover:bg-orange-600 text-white font-semibold text-sm
-                         px-5 py-2.5 rounded-xl transition-all whitespace-nowrap">
+              className="bg-amber-600 hover:bg-amber-700 text-white font-semibold text-sm px-5 py-2.5 rounded-xl transition-all whitespace-nowrap">
               Apply Now
             </Link>
           </div>

@@ -1,6 +1,6 @@
 import os
+import json
 
-# Scan the folder where this script exists (portable)
 ROOT_FOLDER = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FILE = "new.txt"
 
@@ -18,7 +18,10 @@ SKIP_DIRS = {
 }
 
 # Prevent recursive snapshot growth
-IGNORE_FILES = {"new.txt", "final.txt"}
+IGNORE_FILES = {
+    "new.txt", "final.txt",
+    "package-lock.json", "yarn.lock", "pnpm-lock.yaml"
+}
 
 # Allowed source file types
 ALLOWED_EXTENSIONS = {
@@ -27,45 +30,44 @@ ALLOWED_EXTENSIONS = {
     ".yml",".yaml",".env"
 }
 
-# Skip huge files (important for real projects)
+# Skip huge files
 MAX_FILE_SIZE_MB = 2
 MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024
 
 
-# ─────────────────────────────────────────────
-# Build folder tree
-# ─────────────────────────────────────────────
-def build_tree(start_path):
-    tree_lines = []
+def should_skip_path(path: str) -> bool:
+    """Skip if any forbidden directory is in the path."""
+    return any(skip in path.split(os.sep) for skip in SKIP_DIRS)
 
+
+def build_tree(start_path: str) -> str:
+    tree_lines = []
     for root, dirs, files in os.walk(start_path):
+        if should_skip_path(root):
+            continue
+
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
 
         level = root.replace(start_path, "").count(os.sep)
         indent = "│   " * level
         folder_name = os.path.basename(root)
 
-        if level == 0:
-            tree_lines.append(folder_name)
-        else:
-            tree_lines.append(f"{indent}├── {folder_name}")
+        tree_lines.append(folder_name if level == 0 else f"{indent}├── {folder_name}")
 
         sub_indent = "│   " * (level + 1)
-
         for f in files:
             if f in IGNORE_FILES:
                 continue
             if os.path.splitext(f)[1].lower() in ALLOWED_EXTENSIONS:
                 tree_lines.append(f"{sub_indent}└── {f}")
-
     return "\n".join(tree_lines)
 
 
-# ─────────────────────────────────────────────
-# Dump file contents
-# ─────────────────────────────────────────────
 def dump_files(outfile):
     for root, dirs, files in os.walk(ROOT_FOLDER):
+        if should_skip_path(root):
+            continue
+
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
 
         for file in files:
@@ -75,8 +77,6 @@ def dump_files(outfile):
                 continue
 
             full_path = os.path.join(root, file)
-
-            # Skip huge files
             if os.path.getsize(full_path) > MAX_FILE_SIZE:
                 continue
 
@@ -89,7 +89,6 @@ def dump_files(outfile):
                 outfile.write(f"FILE: {full_path}\n")
                 outfile.write("=" * 90 + "\n\n")
                 outfile.write(content)
-
             except Exception as e:
                 outfile.write("\n\n")
                 outfile.write("=" * 90 + "\n")
@@ -98,12 +97,8 @@ def dump_files(outfile):
                 outfile.write("=" * 90 + "\n")
 
 
-# ─────────────────────────────────────────────
-# Main runner
-# ─────────────────────────────────────────────
 def create_snapshot():
     with open(OUTPUT_FILE, "w", encoding="utf-8") as outfile:
-
         outfile.write("ALL PROJECT FILES SNAPSHOT\n")
         outfile.write("=" * 90 + "\n\n")
 

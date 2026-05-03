@@ -57,5 +57,6 @@ export const getQnA        = (s) => api.get(`/qna/${s}`);
 export const askQuestion   = (d) => api.post('/qna', d);
 export const getDashboard  = () => api.get('/dashboard');
 export const getCoupons    = () => api.get('/coupons');
+export const getLiveScore = () => api.get('/live-score');
 
 export default api;
