@@ -2,11 +2,12 @@
 main.py — X Education Marketing Backend (port 8001)
 Reads from the shared user DB. Marketing-specific tables stored here too.
 """
-import os, csv, io, sqlite3
+import os, csv, io, sqlite3, uuid, random
+from urllib.parse import quote
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response, RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
 from dotenv import load_dotenv
@@ -22,6 +23,22 @@ MKT_PASSWORD = os.getenv("MARKETING_PASSWORD", "marketing_admin_2025")
 JWT_SECRET   = os.getenv("JWT_SECRET", "mkt_secret")
 JWT_ALGO     = "HS256"
 pwd_ctx      = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+PUBLIC_BASE_URL   = os.getenv("PUBLIC_BASE_URL", "http://localhost:8001")
+USER_FRONTEND_URL = os.getenv("USER_FRONTEND_URL", "http://localhost:5173")
+DEMO_MODE         = os.getenv("DEMO_MODE", "true").lower() == "true"
+
+# 1x1 transparent GIF served by the open-tracking pixel endpoint
+_TRACKING_GIF = bytes.fromhex(
+    "47494638396101000100800000000000ffffff21f90401000000002c00000000010001000002024401003b"
+)
+
+PLV_TIER_MULTIPLIER = {
+    "Target Immediately": 1.5,
+    "Nurture via Email/WhatsApp": 1.0,
+    "Marketing Campaign": 0.6,
+    "Low Priority": 0.2,
+}
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 def user_conn():
@@ -60,6 +77,21 @@ def mex(sql, params=()):
     c.close()
     return lid
 
+def uex(sql, params=()):
+    c = user_conn()
+    cur = c.execute(sql, params)
+    c.commit()
+    lid = cur.lastrowid
+    c.close()
+    return lid
+
+def compute_plv(user_id, recommended_action, conversion_probability=50.0):
+    spent = uq1("SELECT COALESCE(SUM(price_paid),0) as s FROM purchases WHERE user_id=?", (user_id,))["s"]
+    avg_price = uq1("SELECT COALESCE(AVG(price),0) as p FROM cart")["p"] or 5000.0
+    multiplier = PLV_TIER_MULTIPLIER.get(recommended_action, 0.3)
+    future_value = avg_price * (conversion_probability / 100.0) * multiplier
+    return round(spent + future_value, 2)
+
 # ── Init marketing DB ─────────────────────────────────────────────────────────
 def init_mkt_db():
     c = mkt_conn()
@@ -82,8 +114,19 @@ def init_mkt_db():
         status     TEXT DEFAULT 'pending',
         created_at TEXT DEFAULT (datetime('now','localtime'))
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS ab_tests (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT,
+        tier       TEXT,
+        subject_a  TEXT,
+        body_a     TEXT,
+        subject_b  TEXT,
+        body_b     TEXT,
+        status     TEXT DEFAULT 'draft',
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
     c.commit(); c.close()
-    print(f"[MKT-DB] Initialised → {MKT_DB}")
+    print(f"[MKT-DB] Initialised -> {MKT_DB}")
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="X Education Marketing API", version="2.0.0")
@@ -94,6 +137,12 @@ app.add_middleware(CORSMiddleware,
 @app.on_event("startup")
 def startup():
     init_mkt_db()
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from decay import lead_decay_job
+    sched = BackgroundScheduler(timezone="Asia/Kolkata")
+    sched.add_job(lead_decay_job, "interval", minutes=5)
+    sched.start()
+    print("[SCHEDULER] Lead decay job started")
     print("[API] Marketing Backend running on port 8001")
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -145,7 +194,7 @@ def stats(_=Depends(mkt_auth)):
 
 # ── LEADS ─────────────────────────────────────────────────────────────────────
 @app.get("/api/mkt/leads")
-def get_leads(tier: Optional[str]=None, search: Optional[str]=None, _=Depends(mkt_auth)):
+def get_leads(tier: Optional[str]=None, search: Optional[str]=None, sort: Optional[str]=None, _=Depends(mkt_auth)):
     sql = """
         SELECT l.*, u.name, u.email, up.phone, up.whatsapp_opt_in,
                up.current_occupation, up.specialization, up.city
@@ -160,8 +209,23 @@ def get_leads(tier: Optional[str]=None, search: Optional[str]=None, _=Depends(mk
     if search:
         sql += " AND (u.name LIKE ? OR u.email LIKE ? OR l.course_type LIKE ?)"
         s = f"%{search}%"; params += [s, s, s]
-    sql += " ORDER BY l.created_at DESC"
+    sql += " ORDER BY l.plv DESC" if sort == "plv" else " ORDER BY l.created_at DESC"
     return {"leads": uq(sql, params)}
+
+
+# ── PRIORITY QUEUE (hot leads with high PLV) ───────────────────────────────────
+@app.get("/api/mkt/priority-queue")
+def priority_queue(limit: int = 20, _=Depends(mkt_auth)):
+    leads = uq("""
+        SELECT l.*, u.name, u.email, up.current_occupation
+        FROM leads l JOIN users u ON l.user_id=u.id
+        LEFT JOIN user_profiles up ON up.user_id=l.user_id
+        WHERE l.recommended_action != 'Low Priority'
+    """)
+    for l in leads:
+        l["priority_rank"] = round((l["lead_score"] or 0) * (l["plv"] or 0), 2)
+    leads.sort(key=lambda l: l["priority_rank"], reverse=True)
+    return {"priority_queue": leads[:limit]}
 
 @app.get("/api/mkt/leads/{lead_id}")
 def get_lead(lead_id: int, _=Depends(mkt_auth)):
@@ -184,6 +248,100 @@ def get_lead(lead_id: int, _=Depends(mkt_auth)):
     )
     return lead
 
+# ── ATTRIBUTION ───────────────────────────────────────────────────────────────
+@app.get("/api/mkt/leads/{lead_id}/attribution")
+def lead_attribution(lead_id: int, _=Depends(mkt_auth)):
+    lead = uq1("SELECT * FROM leads WHERE id=?", (lead_id,))
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    user_id = lead["user_id"]
+
+    events = uq("""
+        SELECT 'behaviour' as kind, event_type as label, course_slug, created_at
+        FROM behaviour_events WHERE user_id=?
+    """, (user_id,))
+    emails = uq("""
+        SELECT 'email' as kind,
+               CASE WHEN opened_at IS NOT NULL THEN 'email_opened' ELSE 'email_sent' END as label,
+               NULL as course_slug, COALESCE(opened_at, sent_at) as created_at
+        FROM email_sends WHERE user_id=?
+    """, (user_id,))
+    clicks = uq("""
+        SELECT 'email' as kind, 'email_clicked' as label, NULL as course_slug, first_clicked_at as created_at
+        FROM email_sends WHERE user_id=? AND first_clicked_at IS NOT NULL
+    """, (user_id,))
+    purchases = uq("""
+        SELECT 'purchase' as kind, course_title as label, course_slug, purchased_at as created_at
+        FROM purchases WHERE user_id=?
+    """, (user_id,))
+    lead_touch = [{"kind": "lead_created", "label": lead["trigger_reason"], "course_slug": None, "created_at": lead["created_at"]}]
+
+    timeline = sorted(
+        [e for e in (events + emails + clicks + purchases + lead_touch) if e["created_at"]],
+        key=lambda e: e["created_at"]
+    )
+
+    first_touch = timeline[0] if timeline else None
+    last_touch_before_purchase = None
+    first_purchase_at = next((p["created_at"] for p in purchases if p["created_at"]), None)
+    if first_purchase_at:
+        before = [e for e in timeline if e["created_at"] < first_purchase_at and e["kind"] != "purchase"]
+        last_touch_before_purchase = before[-1] if before else None
+
+    return {
+        "lead_id": lead_id,
+        "user_id": user_id,
+        "timeline": timeline,
+        "first_touch": first_touch,
+        "last_touch_before_purchase": last_touch_before_purchase,
+        "converted": first_purchase_at is not None,
+    }
+
+
+# ── CAMPAIGN INFLUENCE (dashboard aggregate) ───────────────────────────────────
+@app.get("/api/mkt/campaign-influence")
+def campaign_influence(_=Depends(mkt_auth)):
+    sends = uq("""
+        SELECT es.*, l.trigger_reason FROM email_sends es
+        LEFT JOIN leads l ON l.id = es.lead_id
+        WHERE es.sent_at IS NOT NULL
+    """)
+    influence = {}
+    for send in sends:
+        reason = send.get("trigger_reason") or "manual_send"
+        bucket = influence.setdefault(reason, {"emails_sent": 0, "opens": 0, "clicks": 0, "influenced_conversions": 0})
+        bucket["emails_sent"] += 1
+        if send["open_count"]:
+            bucket["opens"] += 1
+        if send["click_count"]:
+            bucket["clicks"] += 1
+        touch_time = send.get("first_clicked_at") or send.get("opened_at")
+        if touch_time and send["user_id"]:
+            purchase = uq1("""
+                SELECT id FROM purchases WHERE user_id=? AND purchased_at >= ?
+                AND purchased_at <= datetime(?, '+7 days') LIMIT 1
+            """, (send["user_id"], touch_time, touch_time))
+            if purchase:
+                bucket["influenced_conversions"] += 1
+    return {"campaign_influence": influence}
+
+
+# ── EXPLAINABILITY ────────────────────────────────────────────────────────────
+@app.get("/api/mkt/leads/{lead_id}/explain")
+def explain_lead_score(lead_id: int, _=Depends(mkt_auth)):
+    from explain import explain_lead
+    lead = uq1("""
+        SELECT l.*, up.current_occupation FROM leads l
+        LEFT JOIN user_profiles up ON up.user_id=l.user_id
+        WHERE l.id=?
+    """, (lead_id,))
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    return {"lead_id": lead_id, "lead_score": lead["lead_score"],
+            "recommended_action": lead["recommended_action"],
+            "factors": explain_lead(lead)}
+
+
 # ── EMAIL ─────────────────────────────────────────────────────────────────────
 class SendEmailReq(BaseModel):
     lead_id: int; subject: str; body: str
@@ -200,12 +358,57 @@ def send_email_to_lead(req: SendEmailReq, _=Depends(mkt_auth)):
     if not lead: raise HTTPException(404, "Lead not found")
     if lead.get("do_not_email") == "Yes":
         return {"success": False, "message": "User opted out of emails"}
-    ok, msg = send_marketing_email(lead["email"], req.subject, req.body)
+
+    token = uuid.uuid4().hex
+    uex("INSERT INTO email_sends (lead_id, user_id, token, subject, body) VALUES (?,?,?,?,?)",
+        (req.lead_id, lead["user_id"], token, req.subject, req.body))
+    pixel_url = f"{PUBLIC_BASE_URL}/api/mkt/track/open/{token}.gif"
+    course_slug = (lead.get("course_type") or "").lower().replace(" ", "-")
+    dest = f"{USER_FRONTEND_URL}/course/{course_slug}" if course_slug else USER_FRONTEND_URL
+    click_url = f"{PUBLIC_BASE_URL}/api/mkt/track/click/{token}?to={quote(dest, safe='')}"
+
+    ok, msg = send_marketing_email(lead["email"], req.subject, req.body,
+                                    tracking_pixel_url=pixel_url, cta_url=click_url)
     if ok:
-        c = user_conn()
-        c.execute("UPDATE leads SET email_sent=1, email_sent_at=datetime('now','localtime') WHERE id=?", (req.lead_id,))
-        c.commit(); c.close()
+        uex("UPDATE leads SET email_sent=1, email_sent_at=datetime('now','localtime') WHERE id=?", (req.lead_id,))
     return {"success": ok, "message": msg}
+
+# ── OPEN/CLICK TRACKING (public, no auth — hit by email clients/browsers) ─────
+@app.get("/api/mkt/track/open/{token}.gif")
+def track_open(token: str):
+    send = uq1("SELECT * FROM email_sends WHERE token=?", (token,))
+    if send:
+        uex("""UPDATE email_sends SET open_count = open_count + 1,
+               opened_at = COALESCE(opened_at, datetime('now','localtime')) WHERE token=?""", (token,))
+        lead = uq1("SELECT * FROM leads WHERE id=?", (send["lead_id"],)) if send["lead_id"] else None
+        if lead:
+            old_score = lead["lead_score"] or 0
+            new_score = min(100, old_score + 3)
+            uex("UPDATE leads SET email_opened_count = email_opened_count + 1, lead_score=? WHERE id=?",
+                (new_score, lead["id"]))
+            uex("""INSERT INTO lead_score_history (lead_id, user_id, old_score, new_score, old_tier, new_tier, reason)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (lead["id"], lead["user_id"], old_score, new_score,
+                 lead["recommended_action"], lead["recommended_action"], "email_open"))
+    return Response(content=_TRACKING_GIF, media_type="image/gif")
+
+@app.get("/api/mkt/track/click/{token}")
+def track_click(token: str, to: str = USER_FRONTEND_URL):
+    send = uq1("SELECT * FROM email_sends WHERE token=?", (token,))
+    if send:
+        uex("""UPDATE email_sends SET click_count = click_count + 1,
+               first_clicked_at = COALESCE(first_clicked_at, datetime('now','localtime')) WHERE token=?""", (token,))
+        lead = uq1("SELECT * FROM leads WHERE id=?", (send["lead_id"],)) if send["lead_id"] else None
+        if lead:
+            old_score = lead["lead_score"] or 0
+            new_score = min(100, old_score + 7)
+            uex("UPDATE leads SET lead_score=? WHERE id=?", (new_score, lead["id"]))
+            uex("""INSERT INTO lead_score_history (lead_id, user_id, old_score, new_score, old_tier, new_tier, reason)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (lead["id"], lead["user_id"], old_score, new_score,
+                 lead["recommended_action"], lead["recommended_action"], "email_click"))
+    return RedirectResponse(to)
+
 
 # ── AI IMPROVE ────────────────────────────────────────────────────────────────
 class ImproveReq(BaseModel):
@@ -302,6 +505,95 @@ def schedule_campaign(req: CampaignReq, _=Depends(mkt_auth)):
 @app.get("/api/mkt/campaigns")
 def get_campaigns(_=Depends(mkt_auth)):
     return {"campaigns": mq("SELECT * FROM campaign_schedules ORDER BY scheduled_at DESC")}
+
+# ── A/B TESTING ───────────────────────────────────────────────────────────────
+class AbTestReq(BaseModel):
+    name: str; tier: str
+    subject_a: str; body_a: str
+    subject_b: str; body_b: str
+
+@app.post("/api/mkt/ab-tests")
+def create_ab_test(req: AbTestReq, _=Depends(mkt_auth)):
+    test_id = mex("""
+        INSERT INTO ab_tests (name, tier, subject_a, body_a, subject_b, body_b)
+        VALUES (?,?,?,?,?,?)
+    """, (req.name, req.tier, req.subject_a, req.body_a, req.subject_b, req.body_b))
+    return {"id": test_id, "message": f"A/B test '{req.name}' created."}
+
+@app.get("/api/mkt/ab-tests")
+def list_ab_tests(_=Depends(mkt_auth)):
+    return {"ab_tests": mq("SELECT * FROM ab_tests ORDER BY created_at DESC")}
+
+@app.post("/api/mkt/ab-tests/{test_id}/send")
+def send_ab_test(test_id: int, _=Depends(mkt_auth)):
+    from email_service import send_marketing_email
+    test = mq("SELECT * FROM ab_tests WHERE id=?", (test_id,))
+    if not test:
+        raise HTTPException(404, "A/B test not found")
+    test = test[0]
+
+    leads = uq("""
+        SELECT l.id as lead_id, l.user_id, l.course_type, u.email, up.do_not_email
+        FROM leads l JOIN users u ON l.user_id=u.id
+        LEFT JOIN user_profiles up ON up.user_id=l.user_id
+        WHERE l.recommended_action=?
+    """, (test["tier"],))
+
+    sent_count = {"A": 0, "B": 0}
+    for lead in leads:
+        if lead.get("do_not_email") == "Yes":
+            continue
+        variant = random.choice(["A", "B"])
+        subject = test["subject_a"] if variant == "A" else test["subject_b"]
+        body    = test["body_a"] if variant == "A" else test["body_b"]
+
+        token = uuid.uuid4().hex
+        uex("""INSERT INTO email_sends (lead_id, user_id, ab_test_id, variant, token, subject, body)
+               VALUES (?,?,?,?,?,?,?)""", (lead["lead_id"], lead["user_id"], test_id, variant, token, subject, body))
+        pixel_url = f"{PUBLIC_BASE_URL}/api/mkt/track/open/{token}.gif"
+        course_slug = (lead.get("course_type") or "").lower().replace(" ", "-")
+        dest = f"{USER_FRONTEND_URL}/course/{course_slug}" if course_slug else USER_FRONTEND_URL
+        click_url = f"{PUBLIC_BASE_URL}/api/mkt/track/click/{token}?to={quote(dest, safe='')}"
+
+        ok, _msg = send_marketing_email(lead["email"], subject, body,
+                                         tracking_pixel_url=pixel_url, cta_url=click_url)
+        if ok:
+            sent_count[variant] += 1
+
+    mex("UPDATE ab_tests SET status='sent' WHERE id=?", (test_id,))
+    return {"message": f"A/B test sent. A: {sent_count['A']}, B: {sent_count['B']}"}
+
+@app.get("/api/mkt/ab-tests/{test_id}/results")
+def ab_test_results(test_id: int, _=Depends(mkt_auth)):
+    test = mq("SELECT * FROM ab_tests WHERE id=?", (test_id,))
+    if not test:
+        raise HTTPException(404, "A/B test not found")
+
+    def variant_stats(variant):
+        sends = uq("""
+            SELECT COUNT(*) as sent,
+                   SUM(CASE WHEN open_count>0 THEN 1 ELSE 0 END) as opened,
+                   SUM(CASE WHEN click_count>0 THEN 1 ELSE 0 END) as clicked
+            FROM email_sends WHERE ab_test_id=? AND variant=?
+        """, (test_id, variant))[0]
+        sent = sends["sent"] or 0
+        opened = sends["opened"] or 0
+        clicked = sends["clicked"] or 0
+        return {
+            "sent": sent, "opened": opened, "clicked": clicked,
+            "open_rate": round(opened / sent * 100, 1) if sent else 0,
+            "click_rate": round(clicked / sent * 100, 1) if sent else 0,
+        }
+
+    a_stats = variant_stats("A")
+    b_stats = variant_stats("B")
+    MIN_SAMPLE = 5
+    winner = None
+    if a_stats["sent"] >= MIN_SAMPLE and b_stats["sent"] >= MIN_SAMPLE:
+        winner = "A" if a_stats["open_rate"] >= b_stats["open_rate"] else "B"
+
+    return {"test": test[0], "variant_a": a_stats, "variant_b": b_stats, "winner": winner}
+
 
 # ── Q&A (answer questions) ────────────────────────────────────────────────────
 class AnswerReq(BaseModel):

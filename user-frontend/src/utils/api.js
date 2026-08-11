@@ -48,6 +48,7 @@ export const removeFromCart= (s) => api.delete(`/cart/${s}`);
 export const getWishlist   = () => api.get('/wishlist');
 export const addToWishlist = (d) => api.post('/wishlist', d);
 export const removeFromWishlist = (s) => api.delete(`/wishlist/${s}`);
+export const checkoutStart = () => api.post('/checkout/start');
 export const checkout      = (d) => api.post('/checkout', d);
 export const getPurchases  = () => api.get('/purchases');
 export const submitEnquiry = (d) => api.post('/enquiry', d);

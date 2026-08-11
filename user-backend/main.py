@@ -13,9 +13,9 @@ import database as db
 import auth
 from predict         import predict_lead
 from genai_mock      import generate_content
-from email_service   import send_otp_email, send_marketing_email
+from email_service   import send_otp_email
 from recommendations import get_recommendations
-from scheduler       import start_scheduler
+from scheduler       import start_scheduler, _send_tracked_email
 
 load_dotenv()
 app = FastAPI(title="X Education User API", version="2.0.0")
@@ -399,6 +399,14 @@ def remove_from_wishlist(course_slug: str, user=Depends(get_current_user)):
 
 
 # ── CHECKOUT (simulated purchase) ─────────────────────────────────────────────
+@app.post("/api/checkout/start")
+def checkout_start(user=Depends(get_current_user)):
+    cart = db.get_cart(user["id"])
+    cart_value = sum(item["price"] for item in cart)
+    checkout_id = db.start_checkout_session(user["id"], cart_value)
+    return {"checkout_id": checkout_id, "cart_value": cart_value}
+
+
 @app.post("/api/checkout")
 def checkout(body: CheckoutRequest, user=Depends(get_current_user)):
     cart = db.get_cart(user["id"])
@@ -435,6 +443,8 @@ def checkout(body: CheckoutRequest, user=Depends(get_current_user)):
 
     if coupon_id:
         db.mark_coupon_used(coupon_id)
+
+    db.complete_latest_checkout_session(user["id"])
 
     return {
         "message": "Purchase successful! Great! Welcome to X Education.",
@@ -537,9 +547,13 @@ def submit_enquiry(body: EnquiryRequest, user=Depends(get_current_user)):
                 VALUES (?,?,?,?,datetime('now','localtime','+72 hours'))
             """, (user["id"], content["coupon_code"], discount, prediction["recommended_action"]))
 
+    # Persist Predictive Lifetime Value
+    plv = db.compute_plv(user["id"], prediction["recommended_action"], prediction["conversion_probability"])
+    db.update_lead_plv(lead_id, plv)
+
     # Send confirmation email
     if profile.get("do_not_email") != "Yes":
-        send_marketing_email(user["email"], content["email_subject"], content["email_body"])
+        _send_tracked_email(user["id"], lead_id, user["email"], content["email_subject"], content["email_body"])
         db.execute("UPDATE leads SET email_sent=1, email_sent_at=datetime('now','localtime') WHERE id=?", (lead_id,))
 
     return {
@@ -622,12 +636,14 @@ def get_coupons(user=Depends(get_current_user)):
 @app.post("/api/debug/trigger-jobs")
 def trigger_jobs_manually():
     """
-    Manually runs cart_abandonment_job + session_end_job.
+    Manually runs cart_abandonment_job + session_end_job + checkout_abandonment_job.
     Use this during your demo instead of waiting 15 minutes.
     Open Postman / curl:
       POST http://localhost:8000/api/debug/trigger-jobs
     """
-    from scheduler import cart_abandonment_job, session_end_job
+    from scheduler import cart_abandonment_job, session_end_job, checkout_abandonment_job, wishlist_job
     cart_abandonment_job()
     session_end_job()
-    return {"message": "Both jobs triggered manually. Check marketing dashboard."}
+    checkout_abandonment_job()
+    wishlist_job()
+    return {"message": "All jobs triggered manually. Check marketing dashboard."}

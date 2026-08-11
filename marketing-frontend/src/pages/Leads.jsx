@@ -18,18 +18,26 @@ export default function Leads() {
   const [loading,setLoading]= useState(true)
   const [search, setSearch] = useState('')
   const tier = params.get('tier')
+  const sort = params.get('sort')
 
   useEffect(() => {
     setLoading(true)
-    getLeads(tier, search).then(r => setLeads(r.data.leads)).catch(() => []).finally(() => setLoading(false))
-  }, [tier, search])
+    getLeads(tier, search, sort).then(r => setLeads(r.data.leads)).catch(() => []).finally(() => setLoading(false))
+  }, [tier, search, sort])
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="font-display text-2xl font-bold text-white">Leads</h1>
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, email, course…"
-          className="inp w-64 text-sm"/>
+        <div className="flex gap-2">
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, email, course…"
+            className="inp w-64 text-sm"/>
+          <button onClick={() => setParams(p => { const n = new URLSearchParams(p); sort==='plv' ? n.delete('sort') : n.set('sort','plv'); return n })}
+            className={`px-4 py-2 rounded-xl text-sm font-medium transition-all
+              ${sort==='plv'?'bg-ember text-white':'bg-white/5 border border-white/10 text-slate-400 hover:border-white/30'}`}>
+            Sort by PLV
+          </button>
+        </div>
       </div>
 
       {/* Tier tabs */}
@@ -49,16 +57,16 @@ export default function Leads() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-white/10 text-xs text-slate-500 uppercase tracking-wide">
-                {['Lead','Course','Occupation','Score','Tier','Trigger','Email','Detail'].map(h => (
+                {['Lead','Course','Occupation','Score','PLV','Tier','Trigger','Email','Detail'].map(h => (
                   <th key={h} className={`px-4 py-3 font-semibold ${h==='Detail'||h==='Score'?'text-center':'text-left'}`}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {loading
-                ? <tr><td colSpan={8} className="text-center py-12 text-slate-500"> Loading leads…</td></tr>
+                ? <tr><td colSpan={9} className="text-center py-12 text-slate-500"> Loading leads…</td></tr>
                 : !leads.length
-                ? <tr><td colSpan={8} className="text-center py-12 text-slate-500">No leads found.</td></tr>
+                ? <tr><td colSpan={9} className="text-center py-12 text-slate-500">No leads found.</td></tr>
                 : leads.map(l => (
                   <tr key={l.id} className="hover:bg-white/[0.02] transition-colors">
                     <td className="px-4 py-3.5">
@@ -70,6 +78,7 @@ export default function Leads() {
                     <td className="px-4 py-3.5 text-center">
                       <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-bold ${SC(l.lead_score)}`}>{l.lead_score}</span>
                     </td>
+                    <td className="px-4 py-3.5 text-slate-400 text-xs">₹{(l.plv||0).toLocaleString()}</td>
                     <td className="px-4 py-3.5">
                       <span className={`inline-block text-xs px-2.5 py-1 rounded-full font-medium ${TC(l.recommended_action)}`}>
                         {l.recommended_action==='Nurture via Email/WhatsApp'?'Nurture':l.recommended_action==='Marketing Campaign'?'Campaign':l.recommended_action==='Target Immediately'?'Target Now':l.recommended_action}

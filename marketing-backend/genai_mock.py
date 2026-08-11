@@ -58,6 +58,8 @@ def _nurture(name, occupation, specialization, course, trigger):
     extra = ""
     if trigger == "cart_abandon":
         extra = f"\n\n🛒 We noticed you had {course} in your cart. Life gets busy — we get it. Your spot is still available."
+    elif trigger == "checkout_abandon":
+        extra = f"\n\n💳 You made it all the way to checkout for {course} and stopped just short. Whatever came up, your seat is still being held."
     elif trigger == "wishlist_viewed":
         extra = f"\n\n❤️ You added {course} to your wishlist. Here's something to make the decision easier."
     return {
@@ -134,10 +136,13 @@ Community Manager — X Education
 def _target_immediately(name, occupation, specialization, course, trigger):
     first = (name or "there").split()[0]
     coupon = "VIP_URGENT_25"
+    checkout_note = ""
+    if trigger == "checkout_abandon":
+        checkout_note = f"\n⚠️ You were one click from completing your {course} checkout. This is the very last chance to lock in your seat at this rate.\n"
     return {
         "email_subject": f"🎯 {first} — Priority Match for {course} · 25% Scholarship · 6 Hours Only",
         "email_body": f"""Hi {first},
-
+{checkout_note}
 Our AI system just flagged your profile as a Priority Match for our upcoming {course} cohort.
 
 Given your background as a {occupation} in {specialization}, here's what the data shows:
@@ -218,13 +223,20 @@ The X Education Team
         }
 
     if action == "Target Immediately":
-        return _target_immediately(name, occupation, specialization, course, trigger)
+        content = _target_immediately(name, occupation, specialization, course, trigger)
     elif action == "Nurture via Email/WhatsApp":
-        return _nurture(name, occupation, specialization, course, trigger)
+        content = _nurture(name, occupation, specialization, course, trigger)
     elif action == "Marketing Campaign":
-        return _marketing_campaign(name, occupation, specialization, course, trigger)
+        content = _marketing_campaign(name, occupation, specialization, course, trigger)
     else:
-        return _low_priority(name, occupation, specialization, course, trigger)
+        content = _low_priority(name, occupation, specialization, course, trigger)
+
+    # Checkout abandonment is the strongest possible purchase-intent signal —
+    # always give the deepest available discount to recover the sale.
+    if trigger == "checkout_abandon" and content["coupon_code"]:
+        content["coupon_code"] = "LAST_CHANCE_30"
+
+    return content
 
 
 # ── Claude API integration (uncomment when you have a key) ───────────────────

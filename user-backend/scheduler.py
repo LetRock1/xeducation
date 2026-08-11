@@ -1,4 +1,5 @@
-import os
+import os, uuid
+from urllib.parse import quote
 from apscheduler.schedulers.background import BackgroundScheduler
 import database as db
 from predict import predict_lead
@@ -6,6 +7,19 @@ from genai_mock import generate_content
 from email_service import send_marketing_email
 
 scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
+
+MKT_BASE_URL  = os.getenv("MKT_PUBLIC_BASE_URL", "http://localhost:8001")
+FRONTEND_URL  = os.getenv("USER_FRONTEND_URL", "http://localhost:5173")
+
+
+def _send_tracked_email(user_id, lead_id, to_email, subject, body, course_slug=None):
+    """Sends a marketing email wrapped with an open pixel + click-tracked CTA."""
+    token = uuid.uuid4().hex
+    db.insert_email_send(token, user_id, lead_id=lead_id, subject=subject, body=body)
+    pixel_url = f"{MKT_BASE_URL}/api/mkt/track/open/{token}.gif"
+    dest = f"{FRONTEND_URL}/course/{course_slug}" if course_slug else FRONTEND_URL
+    click_url = f"{MKT_BASE_URL}/api/mkt/track/click/{token}?to={quote(dest, safe='')}"
+    return send_marketing_email(to_email, subject, body, tracking_pixel_url=pixel_url, cta_url=click_url)
 
 # ============================================================
 COOLDOWN_SESSION_HOURS = 6
@@ -17,6 +31,8 @@ DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
 SESSION_INACTIVE_MINUTES = 1 if DEMO_MODE else 15
 CART_ABANDON_MINUTES = 1 if DEMO_MODE else 60
 WISHLIST_DELAY_MINUTES = 1 if DEMO_MODE else 30
+CHECKOUT_ABANDON_MINUTES = 1 if DEMO_MODE else 30
+COOLDOWN_CHECKOUT_HOURS = 12
 
 
 # ============================================================
@@ -60,7 +76,7 @@ def _build_raw(user_id, profile, behaviour, course_title,
 
 def _save_lead(user_id, raw, pred, content, trigger):
     profile = db.get_profile(user_id) or {}
-    db.execute("""
+    lead_id = db.execute("""
         INSERT INTO leads (
             user_id, lead_origin, lead_source, device_type,
             total_visits, total_time_on_website, page_views_per_visit,
@@ -118,6 +134,12 @@ def _save_lead(user_id, raw, pred, content, trigger):
                 VALUES (?,?,?,?,datetime('now','localtime','+72 hours'))
             """, (user_id, content["coupon_code"], discount, pred["recommended_action"]))
 
+    # ── NEW: compute + persist Predictive Lifetime Value ────────────────
+    plv = db.compute_plv(user_id, pred["recommended_action"], pred["conversion_probability"])
+    db.update_lead_plv(lead_id, plv)
+
+    return lead_id
+
 # ============================================================
 # 🛒 CART ABANDONMENT JOB
 # ============================================================
@@ -154,11 +176,12 @@ def cart_abandonment_job():
                 past_purchases=len(purchases),
             )
 
-            _save_lead(user_id, raw, pred, content, "cart_abandon")
-            send_marketing_email(item["email"], content["email_subject"], content["email_body"])
+            lead_id = _save_lead(user_id, raw, pred, content, "cart_abandon")
+            _send_tracked_email(user_id, lead_id, item["email"], content["email_subject"],
+                                 content["email_body"], course_slug=item.get("course_slug"))
             db.mark_cart_email_sent(item["cart_id"])
 
-            print(f"[CART JOB] Email sent → {item['email']}")
+            print(f"[CART JOB] Email sent -> {item['email']}")
 
     except Exception as e:
         print("[CART JOB ERROR]", e)
@@ -204,7 +227,7 @@ def session_end_job():
             )
 
             _save_lead(user_id, raw, pred, content, "session_end")
-            print(f"[SESSION JOB] Lead created → {user['email']} for course '{course_title}'")
+            print(f"[SESSION JOB] Lead created -> {user['email']} for course '{course_title}'")
 
     except Exception as e:
         print("[SESSION JOB ERROR]", e)
@@ -244,18 +267,68 @@ def wishlist_job():
 
             content["coupon_code"] = None  # ❌ No discount email
 
-            _save_lead(user_id, raw, pred, content, "wishlist")
-            send_marketing_email(user["email"], content["email_subject"], content["email_body"])
+            lead_id = _save_lead(user_id, raw, pred, content, "wishlist")
+            _send_tracked_email(user_id, lead_id, user["email"], content["email_subject"], content["email_body"])
 
-            print(f"[WISHLIST JOB] Email sent → {user['email']}")
+            print(f"[WISHLIST JOB] Email sent -> {user['email']}")
 
     except Exception as e:
         print("[WISHLIST JOB ERROR]", e)
+
+
+# ============================================================
+# 💳 CHECKOUT ABANDONMENT JOB
+# ============================================================
+def checkout_abandonment_job():
+    try:
+        sessions = db.get_abandoned_checkouts(CHECKOUT_ABANDON_MINUTES)
+        print(f"[CHECKOUT JOB] Found {len(sessions)} abandoned checkouts")
+
+        for item in sessions:
+            user_id = item["user_id"]
+
+            # 🛑 COOLDOWN CHECK
+            if db.recent_lead_exists(user_id, "checkout_abandon", COOLDOWN_CHECKOUT_HOURS):
+                print(f"[CHECKOUT JOB] Skipping {item['email']} (cooldown)")
+                db.mark_checkout_email_sent(item["checkout_id"])
+                continue
+
+            profile = db.get_profile(user_id) or {}
+            behaviour = db.get_behaviour_summary(user_id)
+            purchases = db.get_purchases(user_id)
+            cart_items = db.get_cart(user_id)
+            course_title = cart_items[0]["course_title"] if cart_items else "your selected course"
+
+            raw = _build_raw(user_id, profile, behaviour,
+                             course_title, cart_abandoned=True,
+                             past_purchases=len(purchases))
+
+            pred = predict_lead(raw)
+
+            content = generate_content(
+                name=item["name"],
+                occupation=profile.get("current_occupation", "Professional"),
+                specialization=profile.get("specialization", "your field"),
+                course=course_title,
+                action=pred["recommended_action"],
+                trigger="checkout_abandon",
+                past_purchases=len(purchases),
+            )
+
+            lead_id = _save_lead(user_id, raw, pred, content, "checkout_abandon")
+            _send_tracked_email(user_id, lead_id, item["email"], content["email_subject"], content["email_body"])
+            db.mark_checkout_email_sent(item["checkout_id"])
+
+            print(f"[CHECKOUT JOB] Email sent -> {item['email']}")
+
+    except Exception as e:
+        print("[CHECKOUT JOB ERROR]", e)
 
 
 def start_scheduler():
     scheduler.add_job(cart_abandonment_job, "interval", minutes=5)
     scheduler.add_job(session_end_job, "interval", minutes=5)
     scheduler.add_job(wishlist_job, "interval", minutes=5)
+    scheduler.add_job(checkout_abandonment_job, "interval", minutes=5)
     scheduler.start()
     print("[SCHEDULER] All jobs started")

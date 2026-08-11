@@ -26,4 +26,5 @@ export const tracker = {
   webinar    (slug)       { this.fire('webinar_view',     slug) },
   cartAdd    (slug)       { this.fire('cart_add',         slug) },
   wishlistAdd(slug)       { this.fire('wishlist_add',     slug) },
+  checkoutStart(slug)     { this.fire('checkout_start',   slug) },
 }

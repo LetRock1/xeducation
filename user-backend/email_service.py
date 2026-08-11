@@ -51,7 +51,17 @@ If you did not request this, please ignore this email.
 </div></div>"""
     return _send(to, subject, body, html)
 
-def send_marketing_email(to: str, subject: str, body: str) -> tuple[bool, str]:
+def send_marketing_email(to: str, subject: str, body: str,
+                          tracking_pixel_url: str = None,
+                          cta_url: str = None, cta_label: str = "View Course") -> tuple[bool, str]:
+    cta_html = (
+        f'<p style="text-align:center;margin-top:20px">'
+        f'<a href="{cta_url}" style="background:#38BDF8;color:#0B1426;padding:12px 28px;'
+        f'border-radius:8px;text-decoration:none;font-weight:700;display:inline-block">{cta_label}</a></p>'
+    ) if cta_url else ""
+    pixel_html = (
+        f'<img src="{tracking_pixel_url}" width="1" height="1" style="display:none" alt="">'
+    ) if tracking_pixel_url else ""
     html = f"""<div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:auto;padding:24px">
 <div style="background:#0B1426;padding:20px 24px;border-radius:8px 8px 0 0">
   <h1 style="color:#38BDF8;margin:0;font-size:20px">X Education</h1>
@@ -59,7 +69,8 @@ def send_marketing_email(to: str, subject: str, body: str) -> tuple[bool, str]:
 </div>
 <div style="background:#f8fafc;padding:28px 24px;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 8px 8px;color:#334155;line-height:1.7;font-size:14px">
 {body.replace(chr(10),'<br>').replace('**','<b>').replace('**','</b>')}
+{cta_html}
 </div>
 <p style="color:#94a3b8;font-size:11px;text-align:center;margin-top:16px">
-X Education · Mumbai, India · <a href="#" style="color:#38BDF8">Unsubscribe</a></p></div>"""
+X Education · Mumbai, India · <a href="#" style="color:#38BDF8">Unsubscribe</a></p></div>{pixel_html}"""
     return _send(to, subject, body, html)

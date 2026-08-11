@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link }     from 'react-router-dom'
-import { getLead, sendEmail, aiImprove, queueSms, generateCoupon } from '../utils/api'
+import { getLead, sendEmail, aiImprove, queueSms, generateCoupon, getLeadExplain, getLeadAttribution } from '../utils/api'
 
 export default function LeadDetail() {
   const { id }      = useParams()
@@ -16,7 +16,9 @@ export default function LeadDetail() {
   const [msg,       setMsg]       = useState('')
   const [smsResult, setSmsResult] = useState('')
   const [couponResult,setCouponResult] = useState('')
-  const [tab,       setTab]       = useState('email') // email | sms | behaviour | coupon
+  const [tab,       setTab]       = useState('email') // email | sms | behaviour | coupon | explain | attribution
+  const [explain,   setExplain]   = useState(null)
+  const [attribution, setAttribution] = useState(null)
 
   useEffect(() => {
     getLead(id)
@@ -72,6 +74,22 @@ export default function LeadDetail() {
     finally { setCouponBusy(false) }
   }
 
+  async function loadExplain() {
+    if (explain) return
+    try { const r = await getLeadExplain(id); setExplain(r.data) } catch {}
+  }
+
+  async function loadAttribution() {
+    if (attribution) return
+    try { const r = await getLeadAttribution(id); setAttribution(r.data) } catch {}
+  }
+
+  function selectTab(key) {
+    setTab(key)
+    if (key === 'explain') loadExplain()
+    if (key === 'attribution') loadAttribution()
+  }
+
   if (loading) return <div className="flex items-center justify-center h-64"><div className="w-8 h-8 border-4 border-ember border-t-transparent rounded-full animate-spin"/></div>
   if (!lead)   return <p className="text-slate-500 text-center mt-20">Lead not found.</p>
 
@@ -101,6 +119,7 @@ export default function LeadDetail() {
             ['Segment',    lead.customer_segment],
             ['Trigger',    lead.trigger_reason],
             ['Conv. Prob.',`${((lead.conversion_probability||0)*100).toFixed(1)}%`],
+            ['PLV',        `₹${(lead.plv||0).toLocaleString()}`],
             ['WhatsApp',   lead.whatsapp_opt_in ? 'Yes Opted In' : '—'],
             ['Coupon',     lead.coupon_code || '—'],
           ].map(([k,v]) => v && (
@@ -120,9 +139,9 @@ export default function LeadDetail() {
         {/* Action panel */}
         <div className="lg:col-span-2 space-y-4">
           {/* Tab selector */}
-          <div className="flex gap-2">
-            {[['email',' Email'],['sms',' SMS/WhatsApp'],['behaviour',' Behaviour'],['coupon',' Coupon']].map(([key,label]) => (
-              <button key={key} onClick={() => setTab(key)}
+          <div className="flex gap-2 flex-wrap">
+            {[['email',' Email'],['sms',' SMS/WhatsApp'],['behaviour',' Behaviour'],['coupon',' Coupon'],['explain','Why this score?'],['attribution','Attribution']].map(([key,label]) => (
+              <button key={key} onClick={() => selectTab(key)}
                 className={`px-4 py-2 rounded-xl text-sm font-medium transition-all
                   ${tab===key?'bg-ember text-white':'bg-white/5 border border-white/10 text-slate-400 hover:border-white/30'}`}>
                 {label}
@@ -255,6 +274,59 @@ export default function LeadDetail() {
                     </div>
                   ))}
                 </div>
+              )}
+            </div>
+          )}
+          {/* EXPLAIN TAB */}
+          {tab==='explain' && (
+            <div className="card p-6">
+              <h3 className="font-display font-semibold text-white mb-4">Why this score?</h3>
+              {!explain && <p className="text-slate-500 text-sm">Loading…</p>}
+              {explain && (
+                <div className="space-y-3">
+                  {explain.factors.map((f, i) => (
+                    <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-white font-semibold text-sm">{f.factor}</p>
+                        <span className="font-mono text-xs text-ember">{f.impact}</span>
+                      </div>
+                      <p className="text-slate-400 text-xs leading-relaxed">{f.detail}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ATTRIBUTION TAB */}
+          {tab==='attribution' && (
+            <div className="card p-6">
+              <h3 className="font-display font-semibold text-white mb-4">Path to Conversion</h3>
+              {!attribution && <p className="text-slate-500 text-sm">Loading…</p>}
+              {attribution && (
+                <>
+                  <div className="grid grid-cols-2 gap-3 mb-6">
+                    <div className="bg-white/5 rounded-xl px-3 py-2.5">
+                      <p className="text-slate-500 text-xs">First Touch</p>
+                      <p className="text-white font-semibold text-sm">{attribution.first_touch?.label || '—'}</p>
+                    </div>
+                    <div className="bg-white/5 rounded-xl px-3 py-2.5">
+                      <p className="text-slate-500 text-xs">Last Touch Before Purchase</p>
+                      <p className="text-white font-semibold text-sm">{attribution.last_touch_before_purchase?.label || (attribution.converted ? '—' : 'Not converted yet')}</p>
+                    </div>
+                  </div>
+                  <h4 className="text-slate-400 text-xs uppercase tracking-wide mb-3 font-semibold">Timeline</h4>
+                  <div className="space-y-2 max-h-72 overflow-y-auto">
+                    {attribution.timeline.map((t, i) => (
+                      <div key={i} className="flex items-center gap-3 text-xs text-slate-400">
+                        <span className="w-32 flex-shrink-0 text-slate-600">{new Date(t.created_at).toLocaleString('en-IN',{dateStyle:'short',timeStyle:'short'})}</span>
+                        <span className="bg-white/5 px-2 py-0.5 rounded-full">{t.kind}</span>
+                        <span className="text-slate-300">{t.label}</span>
+                        {t.course_slug && <span className="text-slate-600">{t.course_slug}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           )}

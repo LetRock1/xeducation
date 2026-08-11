@@ -4,10 +4,11 @@ const a   = () => axios.create({ baseURL:'/api', headers: { Authorization: `Bear
 
 export const mktLogin        = d  => axios.post('/api/mkt/login', d)
 export const getStats        = () => a().get('/mkt/stats')
-export const getLeads        = (tier, search) => {
+export const getLeads        = (tier, search, sort) => {
   let q = []
   if (tier)   q.push(`tier=${encodeURIComponent(tier)}`)
   if (search) q.push(`search=${encodeURIComponent(search)}`)
+  if (sort)   q.push(`sort=${encodeURIComponent(sort)}`)
   return a().get(`/mkt/leads${q.length?'?'+q.join('&'):''}`)
 }
 export const getLead         = id => a().get(`/mkt/leads/${id}`)
@@ -24,3 +25,13 @@ export const answerQnA       = d  => a().post('/mkt/qna/answer', d)
 export const exportCsv       = () => a().get('/mkt/export-csv', { responseType:'blob' })
 export const deleteCoupon   = id => a().delete(`/mkt/coupons/${id}`)
 export const deleteCampaign = id => a().delete(`/mkt/campaigns/${id}`)
+
+export const getLeadExplain     = id => a().get(`/mkt/leads/${id}/explain`)
+export const getLeadAttribution = id => a().get(`/mkt/leads/${id}/attribution`)
+export const getCampaignInfluence = () => a().get('/mkt/campaign-influence')
+export const getPriorityQueue   = (limit) => a().get(`/mkt/priority-queue${limit ? `?limit=${limit}` : ''}`)
+
+export const createAbTest   = d  => a().post('/mkt/ab-tests', d)
+export const getAbTests     = () => a().get('/mkt/ab-tests')
+export const sendAbTest     = id => a().post(`/mkt/ab-tests/${id}/send`)
+export const getAbTestResults = id => a().get(`/mkt/ab-tests/${id}/results`)

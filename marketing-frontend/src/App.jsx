@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard'
 import Leads     from './pages/Leads'
 import LeadDetail from './pages/LeadDetail'
 import Campaigns from './pages/Campaigns'
+import ABTests   from './pages/ABTests'
 import Coupons   from './pages/Coupons'
 import QnAPage   from './pages/QnAPage'
 import Sidebar   from './components/Sidebar'
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="/leads"      element={<Protected><Leads /></Protected>} />
         <Route path="/leads/:id"  element={<Protected><LeadDetail /></Protected>} />
         <Route path="/campaigns"  element={<Protected><Campaigns /></Protected>} />
+        <Route path="/ab-tests"   element={<Protected><ABTests /></Protected>} />
         <Route path="/coupons"    element={<Protected><Coupons /></Protected>} />
         <Route path="/qna"        element={<Protected><QnAPage /></Protected>} />
       </Routes>

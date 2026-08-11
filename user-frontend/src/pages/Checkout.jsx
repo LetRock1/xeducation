@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useNavigate }          from 'react-router-dom'
-import { getCart, checkout }    from '../utils/api'
+import { getCart, checkout, checkoutStart } from '../utils/api'
+import { tracker }              from '../utils/tracker'
 
 export default function Checkout() {
   const navigate = useNavigate()
@@ -8,8 +9,16 @@ export default function Checkout() {
   const [coupon,  setCoupon]  = useState('')
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState('')
+  const started = useRef(false)
 
   useEffect(() => { getCart().then(r => setCart(r.data.cart)).catch(() => {}) }, [])
+
+  useEffect(() => {
+    if (started.current) return
+    started.current = true
+    checkoutStart().catch(() => {})
+    tracker.checkoutStart()
+  }, [])
 
   const total = cart.reduce((s, i) => s + i.price, 0)
 

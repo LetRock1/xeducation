@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link }                from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts'
-import { getStats, exportCsv } from '../utils/api'
+import { getStats, exportCsv, getCampaignInfluence } from '../utils/api'
 
 const TIER_COLORS = {
   'Target Immediately':'#f97316',
@@ -15,9 +15,11 @@ export default function Dashboard() {
   const [stats,   setStats]   = useState(null)
   const [loading, setLoading] = useState(true)
   const [exporting, setExp]   = useState(false)
+  const [influence, setInfluence] = useState(null)
 
   useEffect(() => {
     getStats().then(r => setStats(r.data)).catch(() => {}).finally(() => setLoading(false))
+    getCampaignInfluence().then(r => setInfluence(r.data.campaign_influence)).catch(() => {})
   }, [])
 
   async function handleExport() {
@@ -104,12 +106,32 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Campaign Influence */}
+      {influence && Object.keys(influence).length > 0 && (
+        <div className="card p-6 mb-6">
+          <h3 className="font-display font-semibold text-white mb-4">Campaign Influence</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={Object.entries(influence).map(([trigger, v]) => ({ trigger, ...v }))} margin={{ top:0, right:0, left:-20, bottom:0 }}>
+              <XAxis dataKey="trigger" tick={{ fill:'#94a3b8', fontSize:11 }}/>
+              <YAxis tick={{ fill:'#94a3b8', fontSize:11 }}/>
+              <Tooltip contentStyle={{ background:'#0B1426', border:'1px solid rgba(255,255,255,0.1)', borderRadius:12, color:'#e2e8f0' }}/>
+              <Legend wrapperStyle={{ color:'#94a3b8', fontSize:11 }}/>
+              <Bar dataKey="opens" fill="#38BDF8" radius={[4,4,0,0]}/>
+              <Bar dataKey="clicks" fill="#f59e0b" radius={[4,4,0,0]}/>
+              <Bar dataKey="influenced_conversions" fill="#22c55e" radius={[4,4,0,0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
       {/* Quick links */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { to:'/leads?tier=Target Immediately',        label:'View Target Now Leads',  icon:'🔴', count: stats.by_tier?.['Target Immediately'] || 0 },
           { to:'/leads?tier=Nurture via Email/WhatsApp',label:'View Nurture Queue',     icon:'🟠', count: stats.by_tier?.['Nurture via Email/WhatsApp'] || 0 },
+          { to:'/leads?sort=plv',                        label:'Priority Queue (High PLV)', icon:'💎', count: null },
           { to:'/campaigns',                             label:'Schedule Campaign',      icon:'📅', count: null },
+          { to:'/ab-tests',                              label:'A/B Tests',              icon:'🧪', count: null },
           { to:'/qna',                                   label:'Answer Questions',       icon:'❓', count: null },
         ].map(q => (
           <Link key={q.to} to={q.to}

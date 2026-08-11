@@ -4,6 +4,7 @@ const links = [
   { to:'/',          icon:'', label:'Dashboard'  },
   { to:'/leads',     icon:'', label:'Leads'       },
   { to:'/campaigns', icon:'', label:'Campaigns'   },
+  { to:'/ab-tests',  icon:'', label:'A/B Tests'   },
   { to:'/coupons',   icon:'', label:'Coupons'     },
   { to:'/qna',       icon:'', label:'Q&A'         },
 ]

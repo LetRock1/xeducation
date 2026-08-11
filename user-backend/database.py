@@ -186,9 +186,64 @@ def init_db():
     updated_at    TEXT DEFAULT (datetime('now','localtime'))
     )""")
 
+    # ── 14. CHECKOUT SESSIONS ────────────────────────────────────────
+    c.execute("""CREATE TABLE IF NOT EXISTS checkout_sessions (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id            INTEGER REFERENCES users(id),
+        cart_value         REAL DEFAULT 0,
+        started_at         TEXT DEFAULT (datetime('now','localtime')),
+        completed          INTEGER DEFAULT 0,
+        abandon_email_sent INTEGER DEFAULT 0
+    )""")
+
+    # ── 15. EMAIL SENDS (open/click tracking log, shared by both services) ──
+    c.execute("""CREATE TABLE IF NOT EXISTS email_sends (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        lead_id          INTEGER,
+        user_id          INTEGER REFERENCES users(id),
+        campaign_id      INTEGER,
+        ab_test_id       INTEGER,
+        variant          TEXT DEFAULT 'A',
+        token            TEXT UNIQUE,
+        subject          TEXT,
+        body             TEXT,
+        sent_at          TEXT DEFAULT (datetime('now','localtime')),
+        opened_at        TEXT,
+        open_count       INTEGER DEFAULT 0,
+        first_clicked_at TEXT,
+        click_count      INTEGER DEFAULT 0
+    )""")
+
+    # ── 16. LEAD SCORE HISTORY (decay / rescoring / email-engagement audit) ──
+    c.execute("""CREATE TABLE IF NOT EXISTS lead_score_history (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        lead_id    INTEGER,
+        user_id    INTEGER REFERENCES users(id),
+        old_score  REAL,
+        new_score  REAL,
+        old_tier   TEXT,
+        new_tier   TEXT,
+        reason     TEXT,
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+
     conn.commit()
+
+    # ── Additive migrations for pre-existing DBs ─────────────────────
+    for col_sql in (
+        "ALTER TABLE leads ADD COLUMN plv REAL DEFAULT 0",
+        "ALTER TABLE leads ADD COLUMN last_active_at TEXT",
+        "ALTER TABLE leads ADD COLUMN decayed INTEGER DEFAULT 0",
+        "ALTER TABLE email_sends ADD COLUMN ab_test_id INTEGER",
+    ):
+        try:
+            c.execute(col_sql)
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
     conn.close()
-    print(f"[DB] Initialised → {DB_PATH}")
+    print(f"[DB] Initialised -> {DB_PATH}")
 
 
 # ── HELPER QUERIES ────────────────────────────────────────────────────────────
@@ -441,3 +496,133 @@ def recent_lead_exists(user_id, trigger, hours=6):
         LIMIT 1
     """, (user_id, trigger, f"-{hours} hours"))
     return row is not None
+
+
+# ============================================================
+# CHECKOUT ABANDONMENT
+# ============================================================
+
+def start_checkout_session(user_id, cart_value):
+    return execute(
+        "INSERT INTO checkout_sessions (user_id, cart_value) VALUES (?,?)",
+        (user_id, cart_value)
+    )
+
+
+def complete_latest_checkout_session(user_id):
+    execute("""
+        UPDATE checkout_sessions SET completed=1
+        WHERE id = (
+            SELECT id FROM checkout_sessions
+            WHERE user_id=? AND completed=0
+            ORDER BY started_at DESC LIMIT 1
+        )
+    """, (user_id,))
+
+
+def get_abandoned_checkouts(minutes=30):
+    """
+    Checkout sessions started but not completed within X minutes.
+    """
+    return fetchall("""
+        SELECT
+            cs.id as checkout_id,
+            cs.user_id,
+            cs.cart_value,
+            cs.started_at,
+            u.email,
+            u.name
+        FROM checkout_sessions cs
+        JOIN users u ON u.id = cs.user_id
+        WHERE cs.completed = 0
+          AND cs.abandon_email_sent = 0
+          AND cs.started_at <= datetime('now','localtime', ?)
+    """, (f"-{minutes} minutes",))
+
+
+def mark_checkout_email_sent(checkout_id):
+    execute("UPDATE checkout_sessions SET abandon_email_sent=1 WHERE id=?", (checkout_id,))
+
+
+# ============================================================
+# EMAIL SENDS (open/click tracking)
+# ============================================================
+
+def insert_email_send(token, user_id, lead_id=None, campaign_id=None, variant="A", subject="", body=""):
+    return execute("""
+        INSERT INTO email_sends (lead_id, user_id, campaign_id, variant, token, subject, body)
+        VALUES (?,?,?,?,?,?,?)
+    """, (lead_id, user_id, campaign_id, variant, token, subject, body))
+
+
+def get_email_send_by_token(token):
+    return fetchone("SELECT * FROM email_sends WHERE token=?", (token,))
+
+
+def mark_email_opened(token):
+    execute("""
+        UPDATE email_sends
+        SET open_count = open_count + 1,
+            opened_at = COALESCE(opened_at, datetime('now','localtime'))
+        WHERE token=?
+    """, (token,))
+
+
+def mark_email_clicked(token):
+    execute("""
+        UPDATE email_sends
+        SET click_count = click_count + 1,
+            first_clicked_at = COALESCE(first_clicked_at, datetime('now','localtime'))
+        WHERE token=?
+    """, (token,))
+
+
+# ============================================================
+# LEAD SCORE HISTORY
+# ============================================================
+
+def log_score_change(lead_id, user_id, old_score, new_score, old_tier, new_tier, reason):
+    execute("""
+        INSERT INTO lead_score_history (lead_id, user_id, old_score, new_score, old_tier, new_tier, reason)
+        VALUES (?,?,?,?,?,?,?)
+    """, (lead_id, user_id, old_score, new_score, old_tier, new_tier, reason))
+
+
+def get_score_history(lead_id):
+    return fetchall(
+        "SELECT * FROM lead_score_history WHERE lead_id=? ORDER BY created_at DESC",
+        (lead_id,)
+    )
+
+
+# ============================================================
+# PREDICTIVE LIFETIME VALUE (PLV)
+# ============================================================
+
+PLV_TIER_MULTIPLIER = {
+    "Target Immediately": 1.5,
+    "Nurture via Email/WhatsApp": 1.0,
+    "Marketing Campaign": 0.6,
+    "Low Priority": 0.2,
+}
+
+
+def compute_plv(user_id, recommended_action, conversion_probability=50.0):
+    """
+    PLV = money already spent + a heuristic future-value term based on
+    average course price, conversion probability and lead tier.
+    """
+    spent = fetchone(
+        "SELECT COALESCE(SUM(price_paid),0) as s FROM purchases WHERE user_id=?",
+        (user_id,)
+    )["s"]
+    avg_price = fetchone(
+        "SELECT COALESCE(AVG(price),0) as p FROM cart"
+    )["p"] or 5000.0
+    multiplier = PLV_TIER_MULTIPLIER.get(recommended_action, 0.3)
+    future_value = avg_price * (conversion_probability / 100.0) * multiplier
+    return round(spent + future_value, 2)
+
+
+def update_lead_plv(lead_id, plv):
+    execute("UPDATE leads SET plv=? WHERE id=?", (plv, lead_id))
