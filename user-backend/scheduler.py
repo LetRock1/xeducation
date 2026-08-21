@@ -42,6 +42,7 @@ def _build_raw(user_id, profile, behaviour, course_title,
                cart_abandoned=False, wishlist_count=0,
                enquiry=False, past_purchases=0,
                source="Direct Traffic"):
+    engagement = db.get_email_engagement(user_id)
     return {
         "LeadOrigin": "Landing Page Submission",
         "LeadSource": source,
@@ -56,7 +57,7 @@ def _build_raw(user_id, profile, behaviour, course_title,
         "PricingPageVisited": behaviour.get("pricing_page_visited", 0),
         "TestimonialVisited": behaviour.get("testimonial_visited", 0),
         "WebinarAttended": behaviour.get("webinar_attended", 0),
-        "EmailOpenedCount": 0,
+        "EmailOpenedCount": engagement["opens"],
         "CurrentOccupation": profile.get("current_occupation", "Unemployed"),
         "Specialization": profile.get("specialization", "Business"),
         "CourseType": course_title,

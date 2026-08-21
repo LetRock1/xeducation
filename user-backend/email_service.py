@@ -51,6 +51,60 @@ If you did not request this, please ignore this email.
 </div></div>"""
     return _send(to, subject, body, html)
 
+# Maps a lead's trigger_reason to a human-readable attribution line for
+# purchase-confirmation emails ("closed loop" — credits the channel that converted the buyer).
+ATTRIBUTION_LABELS = {
+    "cart_abandon":       "your cart reminder email",
+    "session_end":        "a personalized nudge after your last visit",
+    "wishlist":           "your wishlist insight email",
+    "checkout_abandon":   "your checkout reminder email",
+    "behaviour_snapshot": "your on-site browsing activity",
+    "enquiry_submitted":  "your course enquiry",
+    "email_open":         "an email you opened",
+    "email_click":        "an email you clicked",
+    "decay":              "your ongoing interest on our site",
+    None:                 "your visit to X Education",
+}
+
+
+def send_purchase_confirmation_email(to: str, name: str, courses: list, channel_label: str,
+                                      total_paid: float, discount_pct: int = 0) -> tuple[bool, str]:
+    course_list = ", ".join(courses)
+    subject = f"Enrollment Confirmed: {course_list} — X Education"
+    discount_note = f" (after {discount_pct}% discount)" if discount_pct else ""
+    body = f"""Hi {name},
+
+Congratulations! Your enrollment is confirmed for:
+
+  {course_list}
+
+Amount paid: Rs.{total_paid:,.2f}{discount_note}
+
+We're glad this reached you through {channel_label} — thank you for trusting X Education
+with your learning journey. Our team will be in touch shortly with your course access details.
+
+— X Education Team"""
+    discount_html = (
+        f' <span style="color:#16a34a">({discount_pct}% discount applied)</span>' if discount_pct else ""
+    )
+    html = f"""<div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:auto;padding:24px">
+<div style="background:#0B1426;padding:20px 24px;border-radius:8px 8px 0 0">
+  <h1 style="color:#38BDF8;margin:0;font-size:20px">X Education</h1>
+  <p style="color:#94a3b8;margin:4px 0 0;font-size:13px">Enrollment Confirmed</p>
+</div>
+<div style="background:#f8fafc;padding:28px 24px;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 8px 8px;color:#334155;line-height:1.7;font-size:14px">
+  <p>Hi {name},</p>
+  <p>🎉 Congratulations! Your enrollment is confirmed for:</p>
+  <p style="font-weight:700;font-size:16px;color:#0B1426">{course_list}</p>
+  <p><b>Amount paid:</b> Rs.{total_paid:,.2f}{discount_html}</p>
+  <p style="color:#64748b;font-size:13px">Attribution: this enrollment is credited to <b>{channel_label}</b>.</p>
+  <p>Our team will be in touch shortly with your course access details.</p>
+</div>
+<p style="color:#94a3b8;font-size:11px;text-align:center;margin-top:16px">
+X Education · Mumbai, India · <a href="#" style="color:#38BDF8">Unsubscribe</a></p></div>"""
+    return _send(to, subject, body, html)
+
+
 def send_marketing_email(to: str, subject: str, body: str,
                           tracking_pixel_url: str = None,
                           cta_url: str = None, cta_label: str = "View Course") -> tuple[bool, str]:

@@ -559,6 +559,17 @@ def get_email_send_by_token(token):
     return fetchone("SELECT * FROM email_sends WHERE token=?", (token,))
 
 
+def get_email_engagement(user_id):
+    """Real opens/clicks for a user — closes the loop between sent emails and pkl scoring."""
+    row = fetchone("""
+        SELECT COALESCE(SUM(open_count),0)  as opens,
+               COALESCE(SUM(click_count),0) as clicks,
+               COUNT(*)                     as emails_sent
+        FROM email_sends WHERE user_id=?
+    """, (user_id,))
+    return row or {"opens": 0, "clicks": 0, "emails_sent": 0}
+
+
 def mark_email_opened(token):
     execute("""
         UPDATE email_sends

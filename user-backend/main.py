@@ -13,7 +13,7 @@ import database as db
 import auth
 from predict         import predict_lead
 from genai_mock      import generate_content
-from email_service   import send_otp_email
+from email_service   import send_otp_email, send_purchase_confirmation_email, ATTRIBUTION_LABELS
 from recommendations import get_recommendations
 from scheduler       import start_scheduler, _send_tracked_email
 
@@ -220,8 +220,9 @@ def track_event(body: BehaviourEvent, user=Depends(get_current_user)):
     )
 
     # 3. Gather data for ML scoring
-    profile   = db.get_profile(user["id"]) or {}
-    behaviour = db.get_behaviour_summary(user["id"])
+    profile    = db.get_profile(user["id"]) or {}
+    behaviour  = db.get_behaviour_summary(user["id"])
+    engagement = db.get_email_engagement(user["id"])
 
     raw = {
         "LeadOrigin":"Website Interaction",
@@ -237,7 +238,7 @@ def track_event(body: BehaviourEvent, user=Depends(get_current_user)):
         "PricingPageVisited": behaviour["pricing_page_visited"],
         "TestimonialVisited": behaviour["testimonial_visited"],
         "WebinarAttended": behaviour["webinar_attended"],
-        "EmailOpenedCount":0,
+        "EmailOpenedCount": engagement["opens"],
         "CurrentOccupation":profile.get("current_occupation","Unemployed"),
         "Specialization":profile.get("specialization","Business"),
         "CourseType":"Browsing",
@@ -280,8 +281,9 @@ def get_live_score(user=Depends(get_current_user)):
         return {"lead_score": row["live_score"], "persona": row["persona"]}
     
     # Fallback: compute a base score from current profile + behaviour
-    profile   = db.get_profile(user["id"]) or {}
-    behaviour = db.get_behaviour_summary(user["id"])
+    profile    = db.get_profile(user["id"]) or {}
+    behaviour  = db.get_behaviour_summary(user["id"])
+    engagement = db.get_email_engagement(user["id"])
     raw = {
         "LeadOrigin":"Website Interaction",
         "LeadSource":"Direct Traffic",
@@ -296,7 +298,7 @@ def get_live_score(user=Depends(get_current_user)):
         "PricingPageVisited": behaviour["pricing_page_visited"],
         "TestimonialVisited": behaviour["testimonial_visited"],
         "WebinarAttended": behaviour["webinar_attended"],
-        "EmailOpenedCount":0,
+        "EmailOpenedCount": engagement["opens"],
         "CurrentOccupation":profile.get("current_occupation","Unemployed"),
         "Specialization":profile.get("specialization","Business"),
         "CourseType":"Browsing",
@@ -423,7 +425,11 @@ def checkout(body: CheckoutRequest, user=Depends(get_current_user)):
         else:
             raise HTTPException(400, "Invalid or expired coupon code.")
 
-    purchased = []
+    # Capture the lead as it stood before this purchase, for attribution credit
+    prior_lead = db.get_user_lead(user["id"])
+
+    purchased  = []
+    total_paid = 0.0
     for item in cart:
         original   = item["price"]
         discounted = round(original * (1 - discount_pct/100), 2)
@@ -437,6 +443,7 @@ def checkout(body: CheckoutRequest, user=Depends(get_current_user)):
             (user["id"], item["course_slug"], "purchase")
         )
         purchased.append(item["course_title"])
+        total_paid += discounted
 
     # Clear cart
     db.execute("DELETE FROM cart WHERE user_id=?", (user["id"],))
@@ -446,10 +453,71 @@ def checkout(body: CheckoutRequest, user=Depends(get_current_user)):
 
     db.complete_latest_checkout_session(user["id"])
 
+    # ── CLOSED LOOP: rescore the lead on actual conversion, using the pkl model ──
+    profile    = db.get_profile(user["id"]) or {}
+    behaviour  = db.get_behaviour_summary(user["id"])
+    engagement = db.get_email_engagement(user["id"])
+    purchases  = db.get_purchases(user["id"])
+
+    raw = {
+        "LeadOrigin":         "Landing Page Submission",
+        "LeadSource":          "Direct Traffic",
+        "DeviceType":          "Desktop",
+        "TotalVisits":         behaviour["total_visits"],
+        "TotalTimeOnWebsite":  behaviour["total_time_on_website"],
+        "PageViewsPerVisit":   behaviour["page_views_per_visit"],
+        "SessionsCount":       behaviour["sessions_count"],
+        "VideoWatched":        behaviour["video_watched"],
+        "BrochureDownloaded":  behaviour["brochure_downloaded"],
+        "ChatInitiated":       behaviour["chat_initiated"],
+        "PricingPageVisited":  behaviour["pricing_page_visited"],
+        "TestimonialVisited":  behaviour["testimonial_visited"],
+        "WebinarAttended":     behaviour["webinar_attended"],
+        "EmailOpenedCount":    engagement["opens"],
+        "CurrentOccupation":   profile.get("current_occupation", "Unemployed"),
+        "Specialization":      profile.get("specialization", "Business Administration"),
+        "CourseType":          purchased[0] if purchased else "Browsing",
+        "City":                profile.get("city", "Unknown"),
+        "Country":             profile.get("country", "India"),
+        "AgeBracket":          profile.get("age_bracket"),
+        "HowDidYouHear":       profile.get("how_did_you_hear", "Unknown"),
+        "DoNotEmail":          profile.get("do_not_email", "No"),
+        "DoNotCall":           profile.get("do_not_call", "No"),
+        "WhatsAppOptIn":       profile.get("whatsapp_opt_in", 0),
+        "enquiry_submitted":   False,
+        "cart_abandoned":      False,
+        "wishlist_count":      len(db.get_wishlist(user["id"])),
+        "past_purchases":      len(purchases),
+    }
+    pred = predict_lead(raw)
+    plv  = db.compute_plv(user["id"], pred["recommended_action"], pred["conversion_probability"])
+
+    if prior_lead:
+        db.execute("""
+            UPDATE leads SET lead_score=?, conversion_probability=?, recommended_action=?,
+                              plv=?, email_opened_count=? WHERE id=?
+        """, (pred["lead_score"], pred["conversion_probability"], pred["recommended_action"],
+              plv, engagement["opens"], prior_lead["id"]))
+        db.log_score_change(
+            prior_lead["id"], user["id"],
+            prior_lead["lead_score"], pred["lead_score"],
+            prior_lead["recommended_action"], pred["recommended_action"],
+            "purchase_conversion"
+        )
+
+    # ── Attributed, properly-branded purchase confirmation email ──
+    channel = prior_lead["trigger_reason"] if prior_lead else None
+    channel_label = ATTRIBUTION_LABELS.get(channel, ATTRIBUTION_LABELS[None])
+    send_purchase_confirmation_email(
+        user["email"], user["name"], purchased, channel_label, total_paid, discount_pct
+    )
+
     return {
         "message": "Purchase successful! Great! Welcome to X Education.",
         "courses_purchased": purchased,
         "discount_applied": f"{discount_pct}%" if discount_pct else "None",
+        "attributed_to": channel_label,
+        "updated_lead_score": pred["lead_score"],
     }
 
 @app.get("/api/purchases")
@@ -460,9 +528,10 @@ def get_purchases(user=Depends(get_current_user)):
 # ── ENQUIRY ───────────────────────────────────────────────────────────────────
 @app.post("/api/enquiry")
 def submit_enquiry(body: EnquiryRequest, user=Depends(get_current_user)):
-    profile   = db.get_profile(user["id"]) or {}
-    behaviour = db.get_behaviour_summary(user["id"])
-    purchases = db.get_purchases(user["id"])
+    profile    = db.get_profile(user["id"]) or {}
+    behaviour  = db.get_behaviour_summary(user["id"])
+    purchases  = db.get_purchases(user["id"])
+    engagement = db.get_email_engagement(user["id"])
 
     # Update phone + whatsapp if provided
     if body.phone:
@@ -485,7 +554,7 @@ def submit_enquiry(body: EnquiryRequest, user=Depends(get_current_user)):
         "PricingPageVisited":  behaviour["pricing_page_visited"],
         "TestimonialVisited":  behaviour["testimonial_visited"],
         "WebinarAttended":     behaviour["webinar_attended"],
-        "EmailOpenedCount":    0,
+        "EmailOpenedCount":    engagement["opens"],
         "CurrentOccupation":   profile.get("current_occupation","Unemployed"),
         "Specialization":      profile.get("specialization","Business Administration"),
         "CourseType":          body.course_type,
