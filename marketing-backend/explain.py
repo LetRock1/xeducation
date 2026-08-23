@@ -42,10 +42,13 @@ def explain_lead(lead: dict) -> list[dict]:
 
     email_opens = lead.get("email_opened_count") or 0
     if email_opens > 0:
-        add("Opened marketing emails", f"Opened {email_opens} marketing email(s). Each open adds +3, each click adds +7 to the live score.", f"+{email_opens * 3} so far")
+        add("Clicked marketing emails", f"Clicked through {email_opens} marketing email(s) — engagement is tracked by real click-through, not an invisible pixel. Each click adds +10 to the live score.", f"+{email_opens * 10} so far")
 
     if lead.get("wishlist_count", 0) and lead.get("wishlist_count", 0) > 0:
         add("Wishlist activity", "Has at least one course on their wishlist.", "+5, capped at 100")
+
+    if lead.get("past_purchases", 0) and lead.get("past_purchases", 0) > 0:
+        add("Paying customer", "Already purchased at least one course — the strongest confidence signal there is. Business rule floors the score at 85 and exempts them from occupation dampening.", "floor 85")
 
     occupation = lead.get("current_occupation")
     if occupation in DAMPENED_OCCUPATIONS and trigger not in ("cart_abandon", "enquiry", "checkout_abandon"):

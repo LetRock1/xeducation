@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { createAbTest, getAbTests, sendAbTest, getAbTestResults } from '../utils/api'
+import { createAbTest, getAbTests, sendAbTest, getAbTestResults, seedAbTestDemo } from '../utils/api'
 
 const TIERS = [
   'Target Immediately',
@@ -18,6 +18,7 @@ export default function ABTests() {
   const [sendingId, setSendingId] = useState(null)
   const [msg, setMsg] = useState('')
   const [results, setResults] = useState({})
+  const [seedingId, setSeedingId] = useState(null)
 
   const load = () => getAbTests().then(r => setTests(r.data.ab_tests)).catch(() => {})
   useEffect(() => { load() }, [])
@@ -52,6 +53,18 @@ export default function ABTests() {
       const r = await getAbTestResults(id)
       setResults(res => ({ ...res, [id]: r.data }))
     } catch {}
+  }
+
+  async function seedDemo(id) {
+    setSeedingId(id)
+    try {
+      await seedAbTestDemo(id)
+      const r = await getAbTestResults(id)
+      setResults(res => ({ ...res, [id]: r.data }))
+      setMsg('Seeded demo sends — results updated.')
+    } catch (err) {
+      setMsg('Error: ' + (err.response?.data?.detail || 'Failed to seed demo data'))
+    } finally { setSeedingId(null) }
   }
 
   const tierLabel = t => t === 'Nurture via Email/WhatsApp' ? 'Nurture' : t === 'Marketing Campaign' ? 'Campaign' : t
@@ -140,16 +153,30 @@ export default function ABTests() {
                       View Results
                     </button>
                   ) : (
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      {['variant_a', 'variant_b'].map((v, i) => (
-                        <div key={v} className={`rounded-lg p-2 border ${
-                          results[t.id].winner === (i === 0 ? 'A' : 'B') ? 'border-ember bg-ember/10' : 'border-white/10 bg-white/5'}`}>
-                          <p className="text-slate-300 font-semibold mb-1">Variant {i === 0 ? 'A' : 'B'}{results[t.id].winner === (i === 0 ? 'A' : 'B') && ' 🏆'}</p>
-                          <p className="text-slate-500">Sent: {results[t.id][v].sent}</p>
-                          <p className="text-slate-500">Open rate: {results[t.id][v].open_rate}%</p>
-                          <p className="text-slate-500">Click rate: {results[t.id][v].click_rate}%</p>
+                    <div>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        {['variant_a', 'variant_b'].map((v, i) => (
+                          <div key={v} className={`rounded-lg p-2 border ${
+                            results[t.id].winner === (i === 0 ? 'A' : 'B') ? 'border-ember bg-ember/10' : 'border-white/10 bg-white/5'}`}>
+                            <p className="text-slate-300 font-semibold mb-1">Variant {i === 0 ? 'A' : 'B'}{results[t.id].winner === (i === 0 ? 'A' : 'B') && ' 🏆'}</p>
+                            <p className="text-slate-500">Sent: {results[t.id][v].sent}</p>
+                            <p className="text-slate-500">Open rate: {results[t.id][v].open_rate}%</p>
+                            <p className="text-slate-500">Click rate: {results[t.id][v].click_rate}%</p>
+                          </div>
+                        ))}
+                      </div>
+                      {!results[t.id].winner && (
+                        <div className="mt-2 flex items-center justify-between gap-2">
+                          <p className="text-slate-500 text-[11px] leading-tight">
+                            Needs ≥{results[t.id].min_sample_needed} sends per variant for a winner
+                            (real traffic is thin for a demo — seed some).
+                          </p>
+                          <button onClick={() => seedDemo(t.id)} disabled={seedingId === t.id}
+                            className="flex-shrink-0 text-xs px-3 py-1.5 rounded-lg border border-ember/40 text-ember hover:bg-ember/10 disabled:opacity-60">
+                            {seedingId === t.id ? 'Seeding…' : 'Seed Demo Data'}
+                          </button>
                         </div>
-                      ))}
+                      )}
                     </div>
                   )}
                 </div>

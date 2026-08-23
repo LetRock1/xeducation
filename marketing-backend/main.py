@@ -28,10 +28,8 @@ PUBLIC_BASE_URL   = os.getenv("PUBLIC_BASE_URL", "http://localhost:8001")
 USER_FRONTEND_URL = os.getenv("USER_FRONTEND_URL", "http://localhost:5173")
 DEMO_MODE         = os.getenv("DEMO_MODE", "true").lower() == "true"
 
-# 1x1 transparent GIF served by the open-tracking pixel endpoint
-_TRACKING_GIF = bytes.fromhex(
-    "47494638396101000100800000000000ffffff21f90401000000002c00000000010001000002024401003b"
-)
+# Engagement tracking is click-only (see track_click below) — no pixel.
+AB_TEST_MIN_SAMPLE = int(os.getenv("AB_TEST_MIN_SAMPLE", "1" if DEMO_MODE else "5"))
 
 PLV_TIER_MULTIPLIER = {
     "Target Immediately": 1.5,
@@ -337,6 +335,9 @@ def explain_lead_score(lead_id: int, _=Depends(mkt_auth)):
     """, (lead_id,))
     if not lead:
         raise HTTPException(404, "Lead not found")
+    lead["past_purchases"] = uq1(
+        "SELECT COUNT(*) as n FROM purchases WHERE user_id=?", (lead["user_id"],)
+    )["n"]
     return {"lead_id": lead_id, "lead_score": lead["lead_score"],
             "recommended_action": lead["recommended_action"],
             "factors": explain_lead(lead)}
@@ -362,47 +363,38 @@ def send_email_to_lead(req: SendEmailReq, _=Depends(mkt_auth)):
     token = uuid.uuid4().hex
     uex("INSERT INTO email_sends (lead_id, user_id, token, subject, body) VALUES (?,?,?,?,?)",
         (req.lead_id, lead["user_id"], token, req.subject, req.body))
-    pixel_url = f"{PUBLIC_BASE_URL}/api/mkt/track/open/{token}.gif"
     course_slug = (lead.get("course_type") or "").lower().replace(" ", "-")
     dest = f"{USER_FRONTEND_URL}/course/{course_slug}" if course_slug else USER_FRONTEND_URL
     click_url = f"{PUBLIC_BASE_URL}/api/mkt/track/click/{token}?to={quote(dest, safe='')}"
 
-    ok, msg = send_marketing_email(lead["email"], req.subject, req.body,
-                                    tracking_pixel_url=pixel_url, cta_url=click_url)
+    ok, msg = send_marketing_email(lead["email"], req.subject, req.body, cta_url=click_url)
     if ok:
         uex("UPDATE leads SET email_sent=1, email_sent_at=datetime('now','localtime') WHERE id=?", (req.lead_id,))
     return {"success": ok, "message": msg}
 
-# ── OPEN/CLICK TRACKING (public, no auth — hit by email clients/browsers) ─────
-@app.get("/api/mkt/track/open/{token}.gif")
-def track_open(token: str):
-    send = uq1("SELECT * FROM email_sends WHERE token=?", (token,))
-    if send:
-        uex("""UPDATE email_sends SET open_count = open_count + 1,
-               opened_at = COALESCE(opened_at, datetime('now','localtime')) WHERE token=?""", (token,))
-        lead = uq1("SELECT * FROM leads WHERE id=?", (send["lead_id"],)) if send["lead_id"] else None
-        if lead:
-            old_score = lead["lead_score"] or 0
-            new_score = min(100, old_score + 3)
-            uex("UPDATE leads SET email_opened_count = email_opened_count + 1, lead_score=? WHERE id=?",
-                (new_score, lead["id"]))
-            uex("""INSERT INTO lead_score_history (lead_id, user_id, old_score, new_score, old_tier, new_tier, reason)
-                   VALUES (?,?,?,?,?,?,?)""",
-                (lead["id"], lead["user_id"], old_score, new_score,
-                 lead["recommended_action"], lead["recommended_action"], "email_open"))
-    return Response(content=_TRACKING_GIF, media_type="image/gif")
+# ── CLICK TRACKING (public, no auth — hit by browsers from the email CTA) ─────
+# Engagement is tracked exclusively by this real click-through, not an
+# invisible pixel: most email clients block remote images by default, so a
+# pixel-based "open" signal was unreliable and often just never fired. A
+# click both proves the email was opened AND shows genuine intent, so it
+# carries the combined score bump (+10) and marks the send as opened+clicked.
+CLICK_SCORE_BUMP = 10
 
 @app.get("/api/mkt/track/click/{token}")
 def track_click(token: str, to: str = USER_FRONTEND_URL):
     send = uq1("SELECT * FROM email_sends WHERE token=?", (token,))
     if send:
         uex("""UPDATE email_sends SET click_count = click_count + 1,
-               first_clicked_at = COALESCE(first_clicked_at, datetime('now','localtime')) WHERE token=?""", (token,))
+               open_count = open_count + 1,
+               opened_at = COALESCE(opened_at, datetime('now','localtime')),
+               first_clicked_at = COALESCE(first_clicked_at, datetime('now','localtime'))
+               WHERE token=?""", (token,))
         lead = uq1("SELECT * FROM leads WHERE id=?", (send["lead_id"],)) if send["lead_id"] else None
         if lead:
             old_score = lead["lead_score"] or 0
-            new_score = min(100, old_score + 7)
-            uex("UPDATE leads SET lead_score=? WHERE id=?", (new_score, lead["id"]))
+            new_score = min(100, old_score + CLICK_SCORE_BUMP)
+            uex("UPDATE leads SET email_opened_count = email_opened_count + 1, lead_score=? WHERE id=?",
+                (new_score, lead["id"]))
             uex("""INSERT INTO lead_score_history (lead_id, user_id, old_score, new_score, old_tier, new_tier, reason)
                    VALUES (?,?,?,?,?,?,?)""",
                 (lead["id"], lead["user_id"], old_score, new_score,
@@ -550,18 +542,58 @@ def send_ab_test(test_id: int, _=Depends(mkt_auth)):
         token = uuid.uuid4().hex
         uex("""INSERT INTO email_sends (lead_id, user_id, ab_test_id, variant, token, subject, body)
                VALUES (?,?,?,?,?,?,?)""", (lead["lead_id"], lead["user_id"], test_id, variant, token, subject, body))
-        pixel_url = f"{PUBLIC_BASE_URL}/api/mkt/track/open/{token}.gif"
         course_slug = (lead.get("course_type") or "").lower().replace(" ", "-")
         dest = f"{USER_FRONTEND_URL}/course/{course_slug}" if course_slug else USER_FRONTEND_URL
         click_url = f"{PUBLIC_BASE_URL}/api/mkt/track/click/{token}?to={quote(dest, safe='')}"
 
-        ok, _msg = send_marketing_email(lead["email"], subject, body,
-                                         tracking_pixel_url=pixel_url, cta_url=click_url)
+        ok, _msg = send_marketing_email(lead["email"], subject, body, cta_url=click_url)
         if ok:
             sent_count[variant] += 1
 
     mex("UPDATE ab_tests SET status='sent' WHERE id=?", (test_id,))
     return {"message": f"A/B test sent. A: {sent_count['A']}, B: {sent_count['B']}"}
+
+
+@app.post("/api/mkt/ab-tests/{test_id}/seed-demo")
+def seed_ab_test_demo(test_id: int, per_variant: int = 8, _=Depends(mkt_auth)):
+    """
+    Demo-only helper: A/B testing needs many real recipients to be
+    statistically meaningful, which a classroom demo never has. This
+    synthesizes `per_variant` extra sends per variant (capped at 25) with
+    randomized open/click outcomes so 'View Results' has enough volume to
+    clear AB_TEST_MIN_SAMPLE and declare a winner without waiting on real
+    traffic. Only usable on an already-sent test.
+    """
+    test = mq("SELECT * FROM ab_tests WHERE id=?", (test_id,))
+    if not test:
+        raise HTTPException(404, "A/B test not found")
+    if test[0]["status"] != "sent":
+        raise HTTPException(400, "Send the test before seeding demo data")
+
+    per_variant = max(1, min(per_variant, 25))
+    # Give the two variants distinct random performance so a winner is
+    # visible instead of a coin-flip every time.
+    open_rate_a = random.uniform(0.35, 0.65)
+    open_rate_b = random.uniform(0.35, 0.65)
+    click_share = 0.5  # fraction of opens that also click through
+
+    for variant, open_rate in (("A", open_rate_a), ("B", open_rate_b)):
+        for _ in range(per_variant):
+            token = uuid.uuid4().hex
+            uex("""INSERT INTO email_sends (lead_id, user_id, ab_test_id, variant, token, subject, body)
+                   VALUES (NULL, NULL, ?, ?, ?, '[demo seed]', '[demo seed]')""",
+                (test_id, variant, token))
+            opened = random.random() < open_rate
+            clicked = opened and random.random() < click_share
+            if opened:
+                uex("""UPDATE email_sends SET open_count=1,
+                       opened_at=datetime('now','localtime') WHERE token=?""", (token,))
+            if clicked:
+                uex("""UPDATE email_sends SET click_count=1,
+                       first_clicked_at=datetime('now','localtime') WHERE token=?""", (token,))
+
+    return {"message": f"Seeded {per_variant} demo sends per variant.", "min_sample_needed": AB_TEST_MIN_SAMPLE}
+
 
 @app.get("/api/mkt/ab-tests/{test_id}/results")
 def ab_test_results(test_id: int, _=Depends(mkt_auth)):
@@ -587,12 +619,12 @@ def ab_test_results(test_id: int, _=Depends(mkt_auth)):
 
     a_stats = variant_stats("A")
     b_stats = variant_stats("B")
-    MIN_SAMPLE = 5
     winner = None
-    if a_stats["sent"] >= MIN_SAMPLE and b_stats["sent"] >= MIN_SAMPLE:
+    if a_stats["sent"] >= AB_TEST_MIN_SAMPLE and b_stats["sent"] >= AB_TEST_MIN_SAMPLE:
         winner = "A" if a_stats["open_rate"] >= b_stats["open_rate"] else "B"
 
-    return {"test": test[0], "variant_a": a_stats, "variant_b": b_stats, "winner": winner}
+    return {"test": test[0], "variant_a": a_stats, "variant_b": b_stats, "winner": winner,
+            "min_sample_needed": AB_TEST_MIN_SAMPLE}
 
 
 # ── Q&A (answer questions) ────────────────────────────────────────────────────

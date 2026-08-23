@@ -1,12 +1,12 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 
 const links = [
-  { to:'/',          icon:'', label:'Dashboard'  },
-  { to:'/leads',     icon:'', label:'Leads'       },
-  { to:'/campaigns', icon:'', label:'Campaigns'   },
-  { to:'/ab-tests',  icon:'', label:'A/B Tests'   },
-  { to:'/coupons',   icon:'', label:'Coupons'     },
-  { to:'/qna',       icon:'', label:'Q&A'         },
+  { to:'/',          icon:'📊', label:'Dashboard'  },
+  { to:'/leads',     icon:'🎯', label:'Leads'       },
+  { to:'/campaigns', icon:'📅', label:'Campaigns'   },
+  { to:'/ab-tests',  icon:'🧪', label:'A/B Tests'   },
+  { to:'/coupons',   icon:'🎟️', label:'Coupons'     },
+  { to:'/qna',       icon:'❓', label:'Q&A'         },
 ]
 
 export default function Sidebar() {
@@ -28,15 +28,15 @@ export default function Sidebar() {
           <NavLink key={l.to} to={l.to} end={l.to==='/'}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
-               ${isActive ? 'bg-ember text-white' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
-            <span>{l.icon}</span>{l.label}
+               ${isActive ? 'bg-ember text-white shadow-lg shadow-ember/20' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
+            <span className="text-base leading-none">{l.icon}</span>{l.label}
           </NavLink>
         ))}
       </nav>
 
       <div className="px-3 py-4 border-t border-white/10">
         <button onClick={logout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-500 hover:text-red-400 hover:bg-white/5 transition-all">
-          <span></span> Logout
+          <span className="text-base leading-none">🚪</span> Logout
         </button>
       </div>
     </aside>

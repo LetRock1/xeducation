@@ -27,15 +27,18 @@ export default function Login() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 pt-20 flex items-center justify-center px-4">
-      <div className="w-full max-w-md">
+    <main className="min-h-screen bg-slate-50 pt-20 flex items-center justify-center px-4 relative overflow-hidden">
+      <div className="pointer-events-none absolute -top-32 -right-32 w-96 h-96 bg-sky-accent/10 rounded-full blur-3xl"/>
+      <div className="pointer-events-none absolute -bottom-32 -left-32 w-96 h-96 bg-gold/10 rounded-full blur-3xl"/>
+
+      <div className="w-full max-w-md relative">
         <div className="text-center mb-8">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-accent to-gold flex items-center justify-center font-display font-black text-navy text-2xl mx-auto mb-4">X</div>
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-accent to-gold flex items-center justify-center font-display font-black text-navy text-2xl mx-auto mb-4 shadow-lg shadow-sky-accent/20">X</div>
           <h1 className="font-display text-3xl font-extrabold text-navy">Welcome Back</h1>
           <p className="text-slate-500 text-sm mt-1">Continue your learning journey</p>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-8">
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow p-8">
           <form onSubmit={handle} className="space-y-4">
             <div><label className="lbl">Email Address</label><input type="email" required value={form.email} onChange={e=>setForm(f=>({...f,email:e.target.value}))} placeholder="priya@gmail.com" className="inp"/></div>
             <div><label className="lbl">Password</label><input type="password" required value={form.password} onChange={e=>setForm(f=>({...f,password:e.target.value}))} placeholder="Your password" className="inp"/></div>

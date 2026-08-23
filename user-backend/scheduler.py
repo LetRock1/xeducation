@@ -13,13 +13,12 @@ FRONTEND_URL  = os.getenv("USER_FRONTEND_URL", "http://localhost:5173")
 
 
 def _send_tracked_email(user_id, lead_id, to_email, subject, body, course_slug=None):
-    """Sends a marketing email wrapped with an open pixel + click-tracked CTA."""
+    """Sends a marketing email with a click-tracked CTA (engagement is click-only, no pixel)."""
     token = uuid.uuid4().hex
     db.insert_email_send(token, user_id, lead_id=lead_id, subject=subject, body=body)
-    pixel_url = f"{MKT_BASE_URL}/api/mkt/track/open/{token}.gif"
     dest = f"{FRONTEND_URL}/course/{course_slug}" if course_slug else FRONTEND_URL
     click_url = f"{MKT_BASE_URL}/api/mkt/track/click/{token}?to={quote(dest, safe='')}"
-    return send_marketing_email(to_email, subject, body, tracking_pixel_url=pixel_url, cta_url=click_url)
+    return send_marketing_email(to_email, subject, body, cta_url=click_url)
 
 # ============================================================
 COOLDOWN_SESSION_HOURS = 6

@@ -87,12 +87,20 @@ def _business_rules(score: float, raw: dict) -> tuple[float, str]:
     if raw.get("wishlist_count", 0) > 0:
         adjusted = min(adjusted + 5.0, 100.0)
 
+    # Has already purchased at least one course → the strongest possible
+    # signal (higher confidence than cart/checkout abandonment or an
+    # enquiry, which are just intent). Floors to Target Immediately so a
+    # paying customer never gets demoted to Low Priority purely because
+    # their on-site browsing signals were thin.
+    if raw.get("past_purchases", 0) > 0:
+        adjusted = max(adjusted, 85.0)
+
     # 👇 NEW: Occupation-based dampening for low-conversion profiles
     occupation = raw.get("CurrentOccupation", "")
     low_conv_occupations = ["Student", "Unemployed", "Housewife"]
     if occupation in low_conv_occupations:
-        # Allow full score only if cart abandoned or enquiry submitted
-        if not raw.get("cart_abandoned") and not raw.get("enquiry_submitted"):
+        # Allow full score only if cart abandoned, enquiry submitted, or already a paying customer
+        if not raw.get("cart_abandoned") and not raw.get("enquiry_submitted") and not raw.get("past_purchases", 0) > 0:
             # Cap the score to a max of 72 for these occupations
             adjusted = min(adjusted, 72.0)
             # Optionally reduce the score slightly to keep it believable

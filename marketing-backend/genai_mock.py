@@ -6,12 +6,31 @@ Produces personalised email + WhatsApp content based on:
   - Their occupation + specialization
   - Trigger reason (session_end / cart_abandon / wishlist_viewed / enquiry)
 
-To swap in real Claude API: replace generate_content() with the
-commented-out generate_content_ai() at the bottom of this file.
+generate_content() calls Gemini automatically when GEMINI_API_KEY is set in
+.env (see generate_content_ai() below) and falls back to the deterministic
+templates in this file — as mock content, or as a safety net if the Gemini
+call fails for any reason (missing key, network error, bad JSON, etc.) so a
+demo never breaks on a flaky API call.
 """
+import os
 from datetime import datetime
 
 YEAR = datetime.now().year
+
+# Plain-English phrase for why we're contacting this lead now, used both as
+# extra context fed into the Gemini prompt and as the fallback used
+# throughout this file's own mock templates.
+TRIGGER_CONTEXT = {
+    "cart_abandon":        "they added a course to their cart but did not complete checkout",
+    "checkout_abandon":    "they reached checkout and stopped one step short of paying",
+    "wishlist_viewed":     "they added a course to their wishlist",
+    "session_end":         "they browsed the site and went inactive",
+    "enquiry":             "they submitted an enquiry form asking for more information",
+    "email_open":          "they opened a previous marketing email",
+    "email_click":         "they clicked through a previous marketing email",
+    "decay":               "they were engaged before but have gone quiet recently",
+    "manual_edit":         "a marketing team member is drafting this email manually",
+}
 
 
 # ── Tier 0: Low Priority — Industry insights, no selling ────────────────────
@@ -192,15 +211,27 @@ def generate_content(
     action: str,
     trigger: str = "session_end",   # session_end / cart_abandon / wishlist_viewed / enquiry
     past_purchases: int = 0,
+    lead_score: float = 0,
 ) -> dict:
     """
     Generate personalised marketing content for a lead.
     trigger gives GenAI context about WHY we're contacting this user now.
+    Tries Gemini first (if GEMINI_API_KEY is configured), falls back to the
+    deterministic templates below on any failure.
     """
     name         = name or "Valued Learner"
     occupation   = occupation or "Professional"
     specialization = specialization or "your field"
     course       = course or "our programme"
+
+    if os.getenv("GEMINI_API_KEY"):
+        try:
+            return generate_content_ai(
+                name, occupation, specialization, course, action, trigger,
+                lead_score, past_purchases,
+            )
+        except Exception as e:
+            print(f"[GEMINI] Falling back to mock content — {e}")
 
     # Returning customer gets a softer, more personal tone
     if past_purchases > 0 and action != "Target Immediately":
@@ -239,33 +270,79 @@ The X Education Team
     return content
 
 
-# ── Claude API integration (uncomment when you have a key) ───────────────────
-# import anthropic, os, json
-#
-# def generate_content_ai(name, occupation, specialization, course, action, trigger, lead_score):
-#     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-#     prompt = f"""You are an expert EdTech marketing copywriter for X Education, an Indian online education platform.
-# Generate hyper-personalised marketing content for this lead:
-# - Name: {name}
-# - Occupation: {occupation}
-# - Industry/Specialization: {specialization}
-# - Course they're interested in: {course}
-# - Lead Score: {lead_score}/100
-# - Marketing Tier: {action}
-# - Trigger (why we're contacting now): {trigger}
-#
-# Rules:
-# - Low Priority: Pure value/insights. NO selling. NO coupon.
-# - Nurture: Insights + 15% coupon (FUTURE_READY_15). Soft CTA.
-# - Marketing Campaign: FOMO + webinar invite + 10% coupon (EARLY_BIRD_10).
-# - Target Immediately: Urgent scholarship (25% off, VIP_URGENT_25). Expires in 6 hours.
-# - Always reference their specific occupation AND specialization AND course.
-# - Sound human. Not like a robot. Not like a template.
-#
-# Respond ONLY in this JSON format:
-# {{"email_subject":"...","email_body":"...","whatsapp_message":"...","coupon_code":"...","call_script":"..."}}"""
-#     msg = client.messages.create(
-#         model="claude-sonnet-4-6", max_tokens=1000,
-#         messages=[{"role":"user","content":prompt}]
-#     )
-#     return json.loads(msg.content[0].text)
+# ── Gemini API integration ────────────────────────────────────────────────────
+COUPON_BY_TIER = {
+    "Low Priority":                "",
+    "Nurture via Email/WhatsApp":  "FUTURE_READY_15",
+    "Marketing Campaign":          "EARLY_BIRD_10",
+    "Target Immediately":          "VIP_URGENT_25",
+}
+
+
+def generate_content_ai(name, occupation, specialization, course, action,
+                         trigger, lead_score=0, past_purchases=0) -> dict:
+    """
+    Real Gemini call. Raises on any failure — the caller (generate_content)
+    catches and falls back to the mock templates, so a bad/missing key or a
+    transient API error never breaks the demo.
+    """
+    import google.generativeai as genai
+    import json as _json
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY not set")
+
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(os.getenv("GEMINI_MODEL", "gemini-3.6-flash"))
+
+    trigger_note = TRIGGER_CONTEXT.get(trigger, "they showed general interest on the site")
+    coupon = COUPON_BY_TIER.get(action, "")
+    coupon_rule = (
+        f"Include the coupon code **{coupon}** at least once in the email body, at checkout."
+        if coupon else "This tier gets NO coupon and NO discount — pure value content only, no selling."
+    )
+    returning_note = (
+        f"This is a RETURNING customer with {past_purchases} past purchase(s) — use a warmer, "
+        "loyalty-driven tone instead of an acquisition pitch."
+        if past_purchases > 0 else ""
+    )
+
+    prompt = f"""You are an expert EdTech marketing copywriter for X Education, an Indian online education platform.
+
+Generate hyper-personalised marketing content for this lead:
+- Name: {name}
+- Occupation: {occupation}
+- Industry/Specialization: {specialization}
+- Course they're interested in: {course}
+- Lead Score: {lead_score}/100
+- Marketing Tier: {action}
+- Attribution — why we're contacting them right now: {trigger_note}
+{returning_note}
+
+Rules:
+- Reference the attribution reason above naturally in the email (e.g. mention the cart/checkout/wishlist/enquiry context) — this email should read as a direct response to that specific action, not a generic blast.
+- {coupon_rule}
+- Always reference their specific occupation AND specialization AND course by name.
+- Sound human and warm. Not robotic, not templated, no purple prose.
+- Keep the email body under 220 words.
+
+Respond with ONLY raw JSON, no markdown fences, in exactly this shape:
+{{"email_subject":"...","email_body":"...","whatsapp_message":"...","coupon_code":"{coupon}","call_script":"..."}}"""
+
+    response = model.generate_content(
+        prompt,
+        generation_config={"response_mime_type": "application/json"},
+    )
+    content = _json.loads(response.text)
+
+    for key in ("email_subject", "email_body", "whatsapp_message"):
+        if not content.get(key):
+            raise ValueError(f"Gemini response missing required field: {key}")
+    content.setdefault("coupon_code", coupon)
+    content.setdefault("call_script", "")
+
+    if trigger == "checkout_abandon" and content["coupon_code"]:
+        content["coupon_code"] = "LAST_CHANCE_30"
+
+    return content

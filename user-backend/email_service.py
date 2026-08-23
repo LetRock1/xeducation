@@ -59,7 +59,7 @@ ATTRIBUTION_LABELS = {
     "wishlist":           "your wishlist insight email",
     "checkout_abandon":   "your checkout reminder email",
     "behaviour_snapshot": "your on-site browsing activity",
-    "enquiry_submitted":  "your course enquiry",
+    "enquiry":            "your course enquiry",
     "email_open":         "an email you opened",
     "email_click":        "an email you clicked",
     "decay":              "your ongoing interest on our site",
@@ -106,16 +106,15 @@ X Education · Mumbai, India · <a href="#" style="color:#38BDF8">Unsubscribe</a
 
 
 def send_marketing_email(to: str, subject: str, body: str,
-                          tracking_pixel_url: str = None,
                           cta_url: str = None, cta_label: str = "View Course") -> tuple[bool, str]:
+    # Engagement is tracked exclusively via the CTA button click-through
+    # (no tracking pixel — most email clients block remote images anyway,
+    # so a pixel-based "open" signal was unreliable; a real click is not).
     cta_html = (
         f'<p style="text-align:center;margin-top:20px">'
         f'<a href="{cta_url}" style="background:#38BDF8;color:#0B1426;padding:12px 28px;'
         f'border-radius:8px;text-decoration:none;font-weight:700;display:inline-block">{cta_label}</a></p>'
     ) if cta_url else ""
-    pixel_html = (
-        f'<img src="{tracking_pixel_url}" width="1" height="1" style="display:none" alt="">'
-    ) if tracking_pixel_url else ""
     html = f"""<div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:auto;padding:24px">
 <div style="background:#0B1426;padding:20px 24px;border-radius:8px 8px 0 0">
   <h1 style="color:#38BDF8;margin:0;font-size:20px">X Education</h1>
@@ -126,5 +125,5 @@ def send_marketing_email(to: str, subject: str, body: str,
 {cta_html}
 </div>
 <p style="color:#94a3b8;font-size:11px;text-align:center;margin-top:16px">
-X Education · Mumbai, India · <a href="#" style="color:#38BDF8">Unsubscribe</a></p></div>{pixel_html}"""
+X Education · Mumbai, India · <a href="#" style="color:#38BDF8">Unsubscribe</a></p></div>"""
     return _send(to, subject, body, html)

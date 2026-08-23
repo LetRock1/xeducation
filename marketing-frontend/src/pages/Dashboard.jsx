@@ -66,7 +66,7 @@ export default function Dashboard() {
           { label:'Target Now',      value: stats.by_tier?.['Target Immediately'] || 0,         icon:'🔴', color:'text-red-400' },
           { label:'Nurture Queue',   value: stats.by_tier?.['Nurture via Email/WhatsApp'] || 0, icon:'🟠', color:'text-orange-400' },
         ].map(s => (
-          <div key={s.label} className="card p-5">
+          <div key={s.label} className="card card-interactive p-5">
             <p className="text-xl mb-1">{s.icon}</p>
             <p className={`font-display text-3xl font-extrabold ${s.color}`}>{s.value}</p>
             <p className="text-slate-500 text-xs mt-1">{s.label}</p>
@@ -135,7 +135,7 @@ export default function Dashboard() {
           { to:'/qna',                                   label:'Answer Questions',       icon:'❓', count: null },
         ].map(q => (
           <Link key={q.to} to={q.to}
-            className="card p-5 hover:border-ember/50 transition-colors group">
+            className="card card-interactive p-5 hover:border-ember/50 group">
             <p className="text-2xl mb-2">{q.icon}</p>
             <p className="font-display text-sm font-semibold text-white group-hover:text-ember transition-colors">{q.label}</p>
             {q.count !== null && <p className="text-slate-400 text-xs mt-1">{q.count} leads</p>}

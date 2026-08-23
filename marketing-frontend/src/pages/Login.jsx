@@ -19,14 +19,18 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
-      <div className="w-full max-w-sm">
+    <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden">
+      {/* Ambient glow — subtle, matches the brand gradient */}
+      <div className="pointer-events-none absolute -top-40 -left-40 w-96 h-96 bg-sky-accent/10 rounded-full blur-3xl"/>
+      <div className="pointer-events-none absolute -bottom-40 -right-40 w-96 h-96 bg-gold/10 rounded-full blur-3xl"/>
+
+      <div className="w-full max-w-sm relative">
         <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky-accent to-gold flex items-center justify-center font-display font-black text-navy text-2xl mx-auto mb-4">X</div>
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky-accent to-gold flex items-center justify-center font-display font-black text-navy text-2xl mx-auto mb-4 shadow-lg shadow-sky-accent/20">X</div>
           <h1 className="font-display text-2xl font-bold text-white">Marketing Dashboard</h1>
           <p className="text-slate-500 text-sm mt-1">X Education — Internal Access Only</p>
         </div>
-        <div className="card p-8">
+        <div className="card p-8 shadow-2xl shadow-black/40">
           <form onSubmit={handle} className="space-y-4">
             <div><label className="lbl">Email</label><input type="email" required value={form.email} onChange={e=>setForm(f=>({...f,email:e.target.value}))} placeholder="admin@xeducation.in" className="inp"/></div>
             <div><label className="lbl">Password</label><input type="password" required value={form.password} onChange={e=>setForm(f=>({...f,password:e.target.value}))} placeholder="Marketing password" className="inp"/></div>

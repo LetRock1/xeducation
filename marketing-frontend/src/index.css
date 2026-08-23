@@ -5,10 +5,21 @@
   * { box-sizing: border-box; }
   body { font-family: 'DM Sans', sans-serif; background: #060D1A; color: #e2e8f0; -webkit-font-smoothing: antialiased; }
   h1,h2,h3,h4 { font-family: 'Sora', sans-serif; }
+  ::selection { background: rgba(249,115,22,0.35); color: #fff; }
+  :focus-visible { outline: 2px solid #38BDF8; outline-offset: 2px; }
+
+  /* Thin dark scrollbar to match the dashboard chrome instead of the default browser one */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #1E3A5F; border-radius: 999px; border: 2px solid #060D1A; }
+  ::-webkit-scrollbar-thumb:hover { background: #38BDF8; }
+  * { scrollbar-width: thin; scrollbar-color: #1E3A5F transparent; }
 }
 @layer utilities {
-  .card { @apply bg-[#0B1426] border border-white/10 rounded-2xl; }
-  .inp  { @apply w-full bg-white/5 border border-white/20 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-sky-accent placeholder-slate-600 transition-colors; }
+  .card { @apply bg-[#0B1426] border border-white/10 rounded-2xl transition-all duration-200; }
+  .card-interactive { @apply hover:border-white/20 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/30; }
+  .inp  { @apply w-full bg-white/5 border border-white/20 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-sky-accent focus:ring-2 focus:ring-sky-accent/20 placeholder-slate-600 transition-all; }
   .lbl  { @apply block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide; }
-  .btn  { @apply bg-ember hover:bg-orange-600 text-white font-semibold px-5 py-2.5 rounded-xl transition-all active:scale-95; }
+  .btn  { @apply bg-ember hover:bg-orange-600 text-white font-semibold px-5 py-2.5 rounded-xl transition-all active:scale-95 shadow-lg shadow-ember/10 hover:shadow-ember/25 disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100; }
+  .badge { @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold; }
 }

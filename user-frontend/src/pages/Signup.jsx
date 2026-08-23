@@ -34,17 +34,20 @@ export default function Signup() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 pt-20 flex items-center justify-center px-4">
-      <div className="w-full max-w-md">
+    <main className="min-h-screen bg-slate-50 pt-20 flex items-center justify-center px-4 relative overflow-hidden">
+      <div className="pointer-events-none absolute -top-32 -right-32 w-96 h-96 bg-sky-accent/10 rounded-full blur-3xl"/>
+      <div className="pointer-events-none absolute -bottom-32 -left-32 w-96 h-96 bg-gold/10 rounded-full blur-3xl"/>
+
+      <div className="w-full max-w-md relative">
         <div className="text-center mb-8">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-accent to-gold flex items-center justify-center font-display font-black text-navy text-2xl mx-auto mb-4">X</div>
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-accent to-gold flex items-center justify-center font-display font-black text-navy text-2xl mx-auto mb-4 shadow-lg shadow-sky-accent/20">X</div>
           <h1 className="font-display text-3xl font-extrabold text-navy">{step==='form' ? 'Create Account' : 'Verify Email'}</h1>
           <p className="text-slate-500 text-sm mt-1">
             {step==='form' ? 'Join 500,000+ learners transforming their careers' : `Enter the 6-digit OTP sent to ${form.email}`}
           </p>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-8">
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow p-8">
           {step === 'form' ? (
             <form onSubmit={handleSignup} className="space-y-4">
               <div><label className="lbl">Full Name *</label><input required value={form.name} onChange={e=>set('name',e.target.value)} placeholder="Priya Sharma" className="inp"/></div>
