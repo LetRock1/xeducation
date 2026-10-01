@@ -1,0 +1,26 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Node.js
+node_modules/
+
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files (contain secrets)
+.env
+*/.env
+
+.env
+venv/
+node_modules/
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+user-backend/ml_models/*.pkl
+ml/lead_data_v4.csv
