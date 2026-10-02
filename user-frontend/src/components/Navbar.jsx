@@ -78,6 +78,9 @@ export default function Navbar() {
                            hover:border-white/50 px-4 py-2 rounded-xl transition-all">
                 {user.name.split(' ')[0]}
               </Link>
+              <Link to="/settings" title="Settings" className="text-slate-400 hover:text-white text-sm transition-colors">
+                Settings
+              </Link>
               <button onClick={() => { logout(); navigate('/') }}
                 className="text-slate-500 hover:text-slate-300 text-sm transition-colors">
                 Sign out
@@ -120,6 +123,7 @@ export default function Navbar() {
               <Link to="/wishlist"  onClick={() => setOpen(false)} className="block text-slate-300 text-sm py-2.5 border-b border-white/5">Saved Courses</Link>
               <Link to="/cart"      onClick={() => setOpen(false)} className="block text-slate-300 text-sm py-2.5 border-b border-white/5">Cart {cartCount > 0 && `(${cartCount})`}</Link>
               <Link to="/dashboard" onClick={() => setOpen(false)} className="block text-slate-300 text-sm py-2.5 border-b border-white/5">Dashboard</Link>
+              <Link to="/settings"  onClick={() => setOpen(false)} className="block text-slate-300 text-sm py-2.5 border-b border-white/5">Settings</Link>
               <button onClick={() => { logout(); setOpen(false); navigate('/') }}
                 className="block text-red-400 text-sm py-2.5 w-full text-left">Sign out</button>
             </>

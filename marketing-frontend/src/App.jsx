@@ -8,6 +8,8 @@ import Campaigns from './pages/Campaigns'
 import ABTests   from './pages/ABTests'
 import Coupons   from './pages/Coupons'
 import QnAPage   from './pages/QnAPage'
+import Callbacks from './pages/Callbacks'
+import Actions   from './pages/Actions'
 import Sidebar   from './components/Sidebar'
 
 function Protected({ children }) {
@@ -35,6 +37,8 @@ export default function App() {
         <Route path="/ab-tests"   element={<Protected><ABTests /></Protected>} />
         <Route path="/coupons"    element={<Protected><Coupons /></Protected>} />
         <Route path="/qna"        element={<Protected><QnAPage /></Protected>} />
+        <Route path="/callbacks"  element={<Protected><Callbacks /></Protected>} />
+        <Route path="/actions"    element={<Protected><Actions /></Protected>} />
       </Routes>
     </BrowserRouter>
   )

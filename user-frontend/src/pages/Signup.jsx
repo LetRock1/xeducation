@@ -1,17 +1,34 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { signup, verifyOtp } from '../utils/api'
+import { useState, useEffect } from 'react'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { signup, verifyOtp, resendOtp } from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 import { tracker } from '../utils/tracker'
 
 export default function Signup() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { login } = useAuth()
-  const [step,    setStep]  = useState('form') // form | otp
+  const [step,    setStep]  = useState(location.state?.step === 'otp' ? 'otp' : 'form') // form | otp
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState('')
-  const [form,    setForm]    = useState({ name:'', email:'', password:'' })
+  const [form,    setForm]    = useState({ name:'', email: location.state?.email || '', password:'' })
   const [otp,     setOtp]     = useState('')
+  const [cooldown, setCooldown] = useState(step === 'otp' ? 60 : 0)
+  const [info,    setInfo]    = useState('')
+
+  useEffect(() => {
+    if (cooldown <= 0) return
+    const t = setTimeout(() => setCooldown(c => c - 1), 1000)
+    return () => clearTimeout(t)
+  }, [cooldown])
+
+  async function handleResend() {
+    setError(''); setInfo('')
+    try {
+      const r = await resendOtp(form.email)
+      setInfo(r.data.message); setCooldown(60)
+    } catch (err) { setError(err.response?.data?.detail || 'Could not resend the code') }
+  }
 
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
@@ -19,7 +36,7 @@ export default function Signup() {
     e.preventDefault(); setError(''); setLoading(true)
     try {
       await signup(form)
-      setStep('otp')
+      setStep('otp'); setCooldown(60)
     } catch(err) { setError(err.response?.data?.detail || 'Signup failed') }
     finally { setLoading(false) }
   }
@@ -30,7 +47,7 @@ export default function Signup() {
       const r = await verifyOtp({ email: form.email, otp })
       login(r.data.token, r.data.user, r.data.session_id || null)
       tracker.newSession()
-      navigate('/complete-profile', { replace: true })
+      navigate(r.data.profile_complete ? '/' : '/complete-profile', { replace: true })
     } catch(err) { setError(err.response?.data?.detail || 'Invalid OTP') }
     finally { setLoading(false) }
   }
@@ -65,6 +82,11 @@ export default function Signup() {
                 <input required value={otp} onChange={e=>setOtp(e.target.value)} placeholder="Enter OTP from email" maxLength={6} className="inp text-center text-2xl font-bold tracking-[0.5em]"/>
               </div>
               <p className="text-slate-400 text-xs text-center">OTP expires in 10 minutes. Check your spam folder if not received.</p>
+              {info && <p className="text-green-700 text-sm bg-green-50 border border-green-200 rounded-xl px-3 py-2">{info}</p>}
+              <button type="button" onClick={handleResend} disabled={cooldown > 0}
+                className="w-full text-sm text-sky-accent hover:underline disabled:text-slate-400 disabled:no-underline">
+                {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend code'}
+              </button>
               {error && <p className="text-red-500 text-sm bg-red-50 border border-red-200 rounded-xl px-3 py-2">⚠️ {error}</p>}
               <button type="submit" disabled={loading} className="w-full btn-primary">{loading ? 'Verifying…' : 'Verify & Continue →'}</button>
               <button type="button" onClick={() => { setStep('form'); setError('') }} className="w-full text-slate-500 text-sm hover:text-navy">← Change email</button>

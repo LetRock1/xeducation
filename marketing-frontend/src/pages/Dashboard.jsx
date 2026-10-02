@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link }                from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts'
-import { getStats, exportCsv, getCampaignInfluence, getModelHealth } from '../utils/api'
+import { getStats, exportCsv, getCampaignInfluence, getModelHealth, getNbaPerformance, runAutomations, getForecast } from '../utils/api'
 
 const TIER_COLORS = {
   'Target Immediately':'#f97316',
@@ -17,12 +17,30 @@ export default function Dashboard() {
   const [exporting, setExp]   = useState(false)
   const [influence, setInfluence] = useState(null)
   const [health,    setHealth]    = useState(null)
+  const [nbaPerf,   setNbaPerf]   = useState(null)
+  const [forecast,  setForecast]  = useState(null)
+  const [running,   setRunning]   = useState(false)
+  const [runResult, setRunResult] = useState(null)
 
-  useEffect(() => {
+  function loadAll() {
     getStats().then(r => setStats(r.data)).catch(() => {}).finally(() => setLoading(false))
     getCampaignInfluence().then(r => setInfluence(r.data.campaign_influence)).catch(() => {})
     getModelHealth().then(r => setHealth(r.data)).catch(() => {})
-  }, [])
+    getNbaPerformance().then(r => setNbaPerf(r.data)).catch(() => {})
+    getForecast().then(r => setForecast(r.data)).catch(() => {})
+  }
+  useEffect(loadAll, [])
+
+  async function handleRunAutomations() {
+    setRunning(true); setRunResult(null)
+    try {
+      const r = await runAutomations()
+      setRunResult({ ok: true, ...r.data })
+      loadAll()
+    } catch (e) {
+      setRunResult({ ok: false, message: e.response?.data?.detail || 'Could not run the automations.' })
+    } finally { setRunning(false) }
+  }
 
   async function handleExport() {
     setExp(true)
@@ -50,11 +68,70 @@ export default function Dashboard() {
           <h1 className="font-display text-3xl font-extrabold text-white">Marketing Intelligence</h1>
           <p className="text-slate-500 text-sm mt-1">X Education — Live Dashboard</p>
         </div>
-        <button onClick={handleExport} disabled={exporting}
-          className="btn text-sm flex items-center gap-2">
-          {exporting ? '⏳ Exporting…' : '⬇️ Export CSV'}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={handleRunAutomations} disabled={running}
+            title="Runs the cart, checkout, wishlist and inactivity follow-ups now instead of waiting for the 5-minute timer"
+            className="btn text-sm flex items-center gap-2 disabled:opacity-60">
+            {running ? '⏳ Running…' : '⚡ Run automations now'}
+          </button>
+          <button onClick={handleExport} disabled={exporting}
+            className="btn text-sm flex items-center gap-2">
+            {exporting ? '⏳ Exporting…' : '⬇️ Export CSV'}
+          </button>
+        </div>
       </div>
+
+      {stats.demo_users > 0 && (
+        <div className="card p-4 mb-6 text-xs text-slate-400 border-sky-accent/30">
+          Includes <span className="text-white font-semibold">{stats.demo_users} simulated demo learners</span> (emails ending
+          @demo.xeducation.test, marked “simulated” in Leads). Their behaviour comes from the dataset generator and their
+          purchases from the simulator, so the numbers below show how the system works, not real customer results.
+          Remove them with <span className="font-mono">remove-demo-data.bat</span>.
+        </div>
+      )}
+
+      {runResult && (
+        <div className={`card p-4 mb-6 text-sm ${runResult.ok ? 'text-slate-300' : 'text-red-400'}`}>
+          <p className="font-semibold">{runResult.message}</p>
+          {runResult.decisions?.length > 0 && (
+            <ul className="mt-2 space-y-1 text-xs text-slate-400">
+              {runResult.decisions.map((d, i) => (
+                <li key={i}>{d.name} · {d.trigger_reason.replace('_', ' ')} → <span className="text-white">{d.action.replaceAll('_', ' ')}</span>{d.policy === 'explore' ? ' (random — learning sample)' : ''}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Pipeline forecast — calibrated probabilities x course price */}
+      {forecast && forecast.open_leads > 0 && (
+        <div className="card p-5 mb-8">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+            <h2 className="font-display text-lg font-bold text-white">Pipeline forecast</h2>
+            <p className="text-slate-500 text-xs">{forecast.open_leads} people who have not bought yet</p>
+          </div>
+          <div className="grid md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <p className="text-slate-500 text-xs">Expected revenue</p>
+              <p className="font-display text-2xl font-extrabold text-green-400">₹{Math.round(forecast.expected_revenue).toLocaleString()}</p>
+              <p className="text-slate-500 text-xs">90% range ₹{Math.round(forecast.range_90[0]).toLocaleString()} – ₹{Math.round(forecast.range_90[1]).toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-slate-500 text-xs">Expected new customers</p>
+              <p className="font-display text-2xl font-extrabold text-white">{forecast.expected_customers}</p>
+              <p className="text-slate-500 text-xs">90% range {forecast.customers_range_90[0]} – {forecast.customers_range_90[1]}</p>
+            </div>
+            <div className="space-y-1">
+              {forecast.by_tier.map(t => (
+                <div key={t.tier} className="flex justify-between text-xs text-slate-300 border-b border-white/5 py-0.5">
+                  <span>{t.tier}</span><span>{t.leads} · ₹{t.expected_revenue.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <p className="text-slate-500 text-[11px] mt-3">{forecast.note}</p>
+        </div>
+      )}
 
       {/* Model health — closed-loop check of the ML model on real users */}
       {health && (
@@ -95,15 +172,52 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Next-best-action — what the uplift engine decided, and how it is doing */}
+      {nbaPerf && (
+        <div className="card p-5 mb-8">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+            <h2 className="font-display text-lg font-bold text-white">Next-best-action</h2>
+            <p className="text-slate-500 text-xs">{nbaPerf.decisions_total} decisions · {nbaPerf.decisions_with_outcome} with known outcome</p>
+          </div>
+          {nbaPerf.decisions_total === 0 ? (
+            <p className="text-slate-400 text-sm">No decisions yet. They are made when a cart or checkout is left, a wishlist goes cold, someone goes inactive, or an enquiry arrives.</p>
+          ) : (
+            <div className="grid md:grid-cols-2 gap-6 text-sm">
+              <table className="w-full">
+                <thead><tr className="text-slate-500 text-left"><th className="py-1 font-medium">Action</th><th className="font-medium">Decisions</th><th className="font-medium">Random (learning)</th><th className="font-medium">Bought</th></tr></thead>
+                <tbody>{Object.entries(nbaPerf.by_action).map(([a, v]) => (
+                  <tr key={a} className="border-t border-white/5 text-slate-300"><td className="py-1.5">{a}</td><td>{v.decisions}</td><td>{v.explore}</td><td>{v.converted}/{v.known_outcome}</td></tr>
+                ))}</tbody>
+              </table>
+              <div>
+                <p className="text-slate-400 text-xs mb-2">Estimated profit per lead if every lead got this policy (inverse-propensity, logged outcomes)</p>
+                {Object.entries(nbaPerf.policy_estimates).map(([k, v]) => (
+                  <div key={k} className="flex justify-between gap-3 text-slate-300 py-1 border-b border-white/5">
+                    <span>{k}</span>
+                    <span className="text-right">
+                      {v.snips_profit_per_lead == null ? '—' : `₹${Math.round(v.snips_profit_per_lead).toLocaleString()}`}
+                      <span className="block text-[11px] text-slate-500">
+                        {v.ci95 ? `95% CI ₹${Math.round(v.ci95[0]).toLocaleString()} – ₹${Math.round(v.ci95[1]).toLocaleString()} · ` : ''}{v.matched_decisions} matching decisions
+                      </span>
+                    </span>
+                  </div>
+                ))}
+                <p className="text-slate-500 text-[11px] mt-2">{nbaPerf.note}</p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {[
-          { label:'Total Leads',     value: stats.total_leads,     icon:'👥', color:'text-white' },
+          { label:'People (leads)',  value: stats.total_leads,     icon:'👥', color:'text-white' },
           { label:'Avg Lead Score',  value: `${stats.avg_lead_score}/100`, icon:'⭐', color:'text-ember' },
-          { label:'Emails Sent',     value: stats.emails_sent,     icon:'✉️', color:'text-sky-accent' },
+          { label:'Emails sent · clicked', value: `${stats.emails_sent} · ${stats.email_clicks ?? 0}`, icon:'✉️', color:'text-sky-accent' },
           { label:'Active Carts',    value: stats.active_carts,    icon:'🛒', color:'text-gold' },
-          { label:'Total Users',     value: stats.total_users,     icon:'🔐', color:'text-green-400' },
-          { label:'Purchases',       value: stats.total_purchases, icon:'💰', color:'text-green-400' },
+          { label:'Open callbacks',  value: stats.open_callbacks ?? 0, icon:'📞', color:'text-sky-accent' },
+          { label:'Purchases · revenue', value: `${stats.total_purchases} · ₹${Math.round(stats.revenue || 0).toLocaleString()}`, icon:'💰', color:'text-green-400' },
           { label:'Target Now',      value: stats.by_tier?.['Target Immediately'] || 0,         icon:'🔴', color:'text-red-400' },
           { label:'Nurture Queue',   value: stats.by_tier?.['Nurture via Email/WhatsApp'] || 0, icon:'🟠', color:'text-orange-400' },
         ].map(s => (

@@ -12,9 +12,10 @@ load_dotenv()
 USER_DB = os.getenv("USER_DB_PATH", "../user-backend/xeducation_user.db")
 DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
 
-# In DEMO_MODE, decay after 2 minutes of inactivity so it's demoable;
+# In DEMO_MODE, decay after 10 minutes of inactivity so it can be shown in a demo
+# (long enough not to demote a lead while you are still presenting it);
 # otherwise decay leads inactive for 7 days.
-DECAY_INACTIVITY_MINUTES = 2 if DEMO_MODE else 7 * 24 * 60
+DECAY_INACTIVITY_MINUTES = 10 if DEMO_MODE else 7 * 24 * 60
 
 TIER_ORDER = [
     "Target Immediately",
@@ -30,29 +31,16 @@ TIER_CEILING = {
     "Low Priority": 39.9,
 }
 
-PLV_TIER_MULTIPLIER = {
-    "Target Immediately": 1.5,
-    "Nurture via Email/WhatsApp": 1.0,
-    "Marketing Campaign": 0.6,
-    "Low Priority": 0.2,
-}
-
-
-def _recompute_plv(conn, user_id, recommended_action, conversion_probability):
+def _recompute_plv(conn, user_id, course_slug, probability):
+    """PLV = money already spent + P(convert) × price of the course of interest."""
+    import catalog
     spent = conn.execute(
         "SELECT COALESCE(SUM(price_paid),0) as s FROM purchases WHERE user_id=?", (user_id,)
     ).fetchone()["s"]
-    avg_price = conn.execute("SELECT COALESCE(AVG(price),0) as p FROM cart").fetchone()["p"] or 5000.0
-    multiplier = PLV_TIER_MULTIPLIER.get(recommended_action, 0.3)
-    p = float(conversion_probability or 0)
-    p = p / 100.0 if p > 1 else p          # stored as 0-1 by predict_lead()
-    return round(spent + avg_price * p * multiplier, 2)
-
-
-def _conn():
-    c = sqlite3.connect(USER_DB, check_same_thread=False, timeout=30)
-    c.row_factory = sqlite3.Row
-    return c
+    price = catalog.price_of(course_slug) or catalog.average_price()
+    p = float(probability or 0)
+    p = p / 100.0 if p > 1 else p
+    return round(spent + price * p, 2)
 
 
 def lead_decay_job():
@@ -88,9 +76,12 @@ def lead_decay_job():
             idx = TIER_ORDER.index(lead["recommended_action"]) if lead["recommended_action"] in TIER_ORDER else len(TIER_ORDER) - 1
             new_tier = TIER_ORDER[min(idx + 1, len(TIER_ORDER) - 1)]
 
-            new_plv = _recompute_plv(conn, user_id, new_tier, lead["conversion_probability"] or 0.5)
-            # keep score and tier consistent: cap the score at the new tier's ceiling
+            # keep score and tier consistent: cap the score at the new tier's ceiling,
+            # and value the lead at that (lower) effective probability
             new_score = min(lead["lead_score"] or 0, TIER_CEILING[new_tier])
+            course_slug = lead["course_slug"] if "course_slug" in lead.keys() else None
+            new_plv = _recompute_plv(conn, user_id, course_slug,
+                                     min(lead["conversion_probability"] or 0, new_score / 100))
             conn.execute("UPDATE leads SET recommended_action=?, lead_score=?, decayed=1, plv=? WHERE id=?",
                          (new_tier, new_score, new_plv, lead["id"]))
             conn.execute(

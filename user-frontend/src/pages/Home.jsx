@@ -5,18 +5,20 @@ import { tracker, observeDwell }       from '../utils/tracker'
 import { COURSES }                     from '../data/courses'
 import RecommendedCourses              from '../components/RecommendedCourses'
 
+// Facts that can be checked on the site (catalogue + refund policy) — no placement or salary claims
 const STATS = [
-  { value: '500K+', label: 'Learners Enrolled' },
-  { value: '94%',   label: 'Placement Rate' },
-  { value: '₹8L+',  label: 'Avg Salary Jump' },
-  { value: '40+',   label: 'Countries' },
+  { value: '24',     label: 'Programmes' },
+  { value: '8',      label: 'Career tracks' },
+  { value: '₹2,200', label: 'EMI from, per month' },
+  { value: '7-day',  label: 'Full-refund window' },
 ]
 
+// Sample testimonials for this demo site (fictional learners, no employer names or salary claims)
 const TESTIMONIALS = [
-  { name: 'Aditi Sharma',  role: 'Data Analyst @ Infosys',          text: 'The capstone project alone got me my job. Practical from Day 1.', stars: 5, av: 'AS' },
-  { name: 'Rohit Verma',   role: 'Marketing Lead @ Swiggy',          text: 'The Google Ads module directly got me a 40% salary increase.', stars: 5, av: 'RV' },
-  { name: 'Sneha Pillai',  role: 'Finance Manager @ HDFC',           text: 'Real deal structures — not just theory. Worth every rupee.', stars: 5, av: 'SP' },
-  { name: 'Kiran Patel',   role: 'SCM Analyst @ Mahindra',           text: 'Ex-Amazon instructor. Every session was industry-grade content.', stars: 5, av: 'KP' },
+  { name: 'Aditi S.',  role: 'Data Analyst',         text: 'The capstone project was the most practical part — I used it in every interview.', stars: 5, av: 'AS' },
+  { name: 'Rohit V.',  role: 'Marketing Lead',       text: 'The ads module finally made attribution and budgets make sense to me.', stars: 5, av: 'RV' },
+  { name: 'Sneha P.',  role: 'Finance Manager',      text: 'Real deal structures — not just theory. The weekly doubt sessions helped a lot.', stars: 5, av: 'SP' },
+  { name: 'Kiran P.',  role: 'Supply-chain Analyst', text: 'Clear, industry-style case studies. I could apply them at work the same week.', stars: 5, av: 'KP' },
 ]
 
 function useReveal() {
@@ -165,7 +167,7 @@ export default function Home() {
                   </div>
                 ))}
                 <div className="pt-2 border-t border-white/10">
-                  <p className="text-gold font-semibold text-xs">98% placement rate · ₹12L avg CTC</p>
+                  <p className="text-gold font-semibold text-xs">EMI from ₹4,200/month · weekly live doubt sessions</p>
                 </div>
               </div>
             </div>
@@ -225,6 +227,7 @@ export default function Home() {
             <h2 className="font-display text-4xl font-extrabold text-navy">
               Real People. <span className="text-gradient">Real Results.</span>
             </h2>
+            <p className="text-slate-400 text-xs mt-2">Sample testimonials on this demo site.</p>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {TESTIMONIALS.map((t, i) => (
@@ -253,7 +256,7 @@ export default function Home() {
       </section>
 
       {/* WEBINAR */}
-      <section ref={webinarRef} className="bg-navy py-20 px-6">
+      <section id="webinar" ref={webinarRef} className="bg-navy py-20 px-6">
         <div className="max-w-3xl mx-auto text-center">
           <p className="inline-block bg-gold/20 text-gold text-sm font-semibold
                         px-4 py-1.5 rounded-full mb-6">
@@ -263,8 +266,8 @@ export default function Home() {
             Is an Online Course Worth It In 2026?
           </h2>
           <p className="text-slate-400 text-lg mb-8">
-            Join 2,000+ professionals every Saturday at 11 AM IST. Alumni share real salary data,
-            career pivots, and honest reviews. No sales pitch.
+            Join us every Saturday at 11 AM IST. Instructors and alumni talk about the
+            programmes, career pivots and honest reviews. No sales pitch.
           </p>
           <button
             onClick={reserveSeat} disabled={seatReserved}

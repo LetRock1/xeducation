@@ -24,3 +24,12 @@ node_modules/
 __pycache__/
 user-backend/ml_models/*.pkl
 ml/lead_data_v4.csv
+
+# added by the v5 update
+.venv/
+dist/
+user-backend/ml_models/
+.vscode/
+.idea/
+.claude/settings.local.json
+new.txt

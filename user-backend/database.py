@@ -230,6 +230,66 @@ def init_db():
         created_at TEXT DEFAULT (datetime('now','localtime'))
     )""")
 
+    # ── 17a. CHAT ASSISTANT TRANSCRIPTS ──────────────────────────────
+    c.execute("""CREATE TABLE IF NOT EXISTS chat_messages (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id      INTEGER REFERENCES users(id),
+        conversation TEXT NOT NULL,
+        role         TEXT NOT NULL,          -- 'user' | 'assistant'
+        text         TEXT NOT NULL,
+        intent       TEXT,
+        course_slug  TEXT,
+        created_at   TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+
+    # ── 17b. CALLBACK REQUESTS (from chat / course page) ─────────────
+    c.execute("""CREATE TABLE IF NOT EXISTS callback_requests (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id        INTEGER REFERENCES users(id),
+        phone          TEXT,
+        course_slug    TEXT,
+        preferred_time TEXT,
+        note           TEXT,
+        status         TEXT DEFAULT 'open',   -- open | done
+        created_at     TEXT DEFAULT (datetime('now','localtime')),
+        closed_at      TEXT
+    )""")
+
+    # ── 17c. NEXT-BEST-ACTION DECISION LOG (closed loop for the uplift model) ──
+    c.execute("""CREATE TABLE IF NOT EXISTS nba_decisions (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id          INTEGER REFERENCES users(id),
+        lead_id          INTEGER,
+        trigger_reason   TEXT,
+        action           TEXT NOT NULL,       -- what was done
+        model_best       TEXT,                -- what the model would have done
+        policy           TEXT,                -- 'model' | 'explore'
+        propensity       REAL,                -- P(this action | logging policy)
+        base_probability REAL,
+        price            REAL,
+        options_json     TEXT,
+        features_json    TEXT,
+        model_version    TEXT,
+        executed_at      TEXT,
+        created_at       TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+
+    # ── 17d. SALES TASKS (calls / WhatsApp chosen by next-best-action) ──
+    c.execute("""CREATE TABLE IF NOT EXISTS sales_tasks (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id       INTEGER REFERENCES users(id),
+        lead_id       INTEGER,
+        decision_id   INTEGER,
+        task_type     TEXT,                   -- 'call' | 'whatsapp'
+        title         TEXT,
+        detail        TEXT,
+        expected_gain REAL,
+        status        TEXT DEFAULT 'open',    -- open | done | skipped
+        outcome       TEXT,
+        created_at    TEXT DEFAULT (datetime('now','localtime')),
+        done_at       TEXT
+    )""")
+
     # ── 17. SCORE SNAPSHOTS (closed loop: features + prediction, later
     #        labelled by whether the user actually bought → retraining data) ──
     c.execute("""CREATE TABLE IF NOT EXISTS score_snapshots (
@@ -256,6 +316,15 @@ def init_db():
         "ALTER TABLE email_sends ADD COLUMN ab_test_id INTEGER",
         "ALTER TABLE leads ADD COLUMN score_factors TEXT",
         "ALTER TABLE leads ADD COLUMN model_version TEXT",
+        "ALTER TABLE leads ADD COLUMN course_slug TEXT",
+        "ALTER TABLE otp_tokens ADD COLUMN attempts INTEGER DEFAULT 0",
+        "ALTER TABLE otp_tokens ADD COLUMN purpose TEXT DEFAULT 'signup'",
+        "ALTER TABLE email_sends ADD COLUMN campaign_name TEXT",
+        "ALTER TABLE leads ADD COLUMN nba_action TEXT",
+        "ALTER TABLE leads ADD COLUMN nba_json TEXT",
+        "ALTER TABLE leads ADD COLUMN tips_json TEXT",
+        "ALTER TABLE wishlist ADD COLUMN reminder_sent INTEGER DEFAULT 0",
+        "ALTER TABLE user_sessions ADD COLUMN followed_up INTEGER DEFAULT 0",
     ):
         try:
             c.execute(col_sql)
@@ -421,22 +490,6 @@ def add_score_snapshot(user_id, source, features, probability, lead_score, tier,
         (user_id, source, json.dumps(features), probability, lead_score, tier, model_version))
 
 
-def get_abandoned_carts():
-    return fetchall("""
-        SELECT c.*, u.email, u.name, up.whatsapp_opt_in,
-               up.current_occupation, up.do_not_email
-        FROM cart c
-        JOIN users u ON c.user_id=u.id
-        LEFT JOIN user_profiles up ON up.user_id=c.user_id
-        WHERE c.abandon_email_sent=0
-          AND c.added_at <= datetime('now','localtime','-60 minutes')
-    """)
-
-
-def mark_cart_email_sent(cart_id):
-    execute("UPDATE cart SET abandon_email_sent=1 WHERE id=?", (cart_id,))
-
-
 def validate_coupon(user_id, code):
     return fetchone("""
         SELECT * FROM coupons_issued
@@ -486,42 +539,60 @@ def mark_cart_email_sent(cart_id):
     )
 
 
-def get_inactive_users(minutes=15):
+def get_inactive_users(minutes=15, lookback_hours=48):
     """
-    Users whose last session activity is older than X minutes.
+    Visits that ended (no activity for `minutes`) and have not been handled by
+    the inactivity job yet — one decision per visit. Only each user's latest
+    visit counts, and only if it happened in the last `lookback_hours`.
     """
     return fetchall("""
-        SELECT 
-            u.id as user_id,
+        SELECT
+            u.id AS user_id,
             u.email,
             u.name,
-            MAX(s.last_active) as last_seen
-        FROM users u
-        JOIN user_sessions s ON s.user_id = u.id
-        GROUP BY u.id
-        HAVING last_seen <= datetime('now','localtime', ?)
-    """, (f"-{minutes} minutes",))
+            s.id AS session_id,
+            s.last_active AS last_seen
+        FROM user_sessions s
+        JOIN users u ON u.id = s.user_id
+        WHERE u.is_verified = 1
+          AND s.id = (SELECT MAX(s2.id) FROM user_sessions s2 WHERE s2.user_id = s.user_id)
+          AND COALESCE(s.followed_up, 0) = 0
+          AND s.last_active <= datetime('now','localtime', ?)
+          AND s.last_active >= datetime('now','localtime', ?)
+    """, (f"-{minutes} minutes", f"-{lookback_hours} hours"))
+
+
+def mark_visit_handled(user_id, session_id):
+    execute("UPDATE user_sessions SET followed_up=1 WHERE user_id=? AND id<=?", (user_id, session_id))
 
 
 def get_users_with_old_wishlist(minutes=30):
     """
-    Users who added wishlist items but did not purchase.
+    Users with a wishlisted course (not bought, not reminded yet) that was
+    added more than `minutes` ago — one reminder per wishlist item.
+    course_slug is the oldest such item (SQLite returns the row of MIN()).
     """
     return fetchall("""
-        SELECT 
+        SELECT
             w.user_id,
             u.email,
             u.name,
+            w.course_slug,
             MIN(w.added_at) as first_added
         FROM wishlist w
         JOIN users u ON u.id = w.user_id
-        LEFT JOIN purchases p 
-            ON p.user_id = w.user_id 
+        LEFT JOIN purchases p
+            ON p.user_id = w.user_id
             AND p.course_slug = w.course_slug
         WHERE p.id IS NULL
+          AND COALESCE(w.reminder_sent, 0) = 0
         GROUP BY w.user_id
         HAVING first_added <= datetime('now','localtime', ?)
     """, (f"-{minutes} minutes",))
+
+
+def mark_wishlist_reminded(user_id):
+    execute("UPDATE wishlist SET reminder_sent=1 WHERE user_id=?", (user_id,))
 
 
 def recent_lead_exists(user_id, trigger, hours=6):
@@ -659,29 +730,18 @@ def get_score_history(lead_id):
 # PREDICTIVE LIFETIME VALUE (PLV)
 # ============================================================
 
-PLV_TIER_MULTIPLIER = {
-    "Target Immediately": 1.5,
-    "Nurture via Email/WhatsApp": 1.0,
-    "Marketing Campaign": 0.6,
-    "Low Priority": 0.2,
-}
-
-
-def compute_plv(user_id, recommended_action, conversion_probability=50.0):
+def compute_plv(user_id, recommended_action=None, conversion_probability=0.0, course_slug=None):
     """
-    PLV = money already spent + a heuristic future-value term based on
-    average course price, conversion probability and lead tier.
+    PLV = money already spent + expected value of the next purchase
+        = spent + P(convert) × price of the course they are interested in
+    (falls back to the catalogue's average price). The old version multiplied
+    by a tier factor as well, which counted the probability twice.
     """
-    spent = fetchone(
-        "SELECT COALESCE(SUM(price_paid),0) as s FROM purchases WHERE user_id=?",
-        (user_id,)
-    )["s"]
-    avg_price = fetchone(
-        "SELECT COALESCE(AVG(price),0) as p FROM cart"
-    )["p"] or 5000.0
-    multiplier = PLV_TIER_MULTIPLIER.get(recommended_action, 0.3)
-    future_value = avg_price * _as_fraction(conversion_probability) * multiplier
-    return round(spent + future_value, 2)
+    import catalog
+    spent = fetchone("SELECT COALESCE(SUM(price_paid),0) as s FROM purchases WHERE user_id=?",
+                     (user_id,))["s"]
+    price = catalog.price_of(course_slug) or catalog.average_price()
+    return round(spent + price * _as_fraction(conversion_probability), 2)
 
 
 def _as_fraction(p):
@@ -692,3 +752,10 @@ def _as_fraction(p):
 
 def update_lead_plv(lead_id, plv):
     execute("UPDATE leads SET plv=? WHERE id=?", (plv, lead_id))
+
+
+def public_user(user):
+    """User row without secrets — never send password_hash to the browser."""
+    if not user:
+        return None
+    return {k: v for k, v in user.items() if k not in ("password_hash",)}

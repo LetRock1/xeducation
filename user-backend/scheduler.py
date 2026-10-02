@@ -1,10 +1,8 @@
-import os, uuid
-from urllib.parse import quote
+import os
 from apscheduler.schedulers.background import BackgroundScheduler
 import database as db
-from scoring import score_user, save_lead
-from genai_mock import generate_content
-from email_service import send_marketing_email
+from playbook import handle_trigger
+from outreach import send_tracked_email
 
 scheduler = BackgroundScheduler(
     timezone="Asia/Kolkata",
@@ -13,22 +11,19 @@ scheduler = BackgroundScheduler(
     job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 300},
 )
 
-MKT_BASE_URL  = os.getenv("MKT_PUBLIC_BASE_URL", "http://localhost:8001")
-FRONTEND_URL  = os.getenv("USER_FRONTEND_URL", "http://localhost:5173")
 
 
 def _send_tracked_email(user_id, lead_id, to_email, subject, body, course_slug=None):
-    """Sends a marketing email with a click-tracked CTA (engagement is click-only, no pixel)."""
-    token = uuid.uuid4().hex
-    db.insert_email_send(token, user_id, lead_id=lead_id, subject=subject, body=body)
-    dest = f"{FRONTEND_URL}/course/{course_slug}" if course_slug else FRONTEND_URL
-    click_url = f"{MKT_BASE_URL}/api/mkt/track/click/{token}?to={quote(dest, safe='')}"
-    return send_marketing_email(to_email, subject, body, cta_url=click_url)
+    """Kept for old imports — see outreach.send_tracked_email."""
+    return send_tracked_email(user_id, lead_id, to_email, subject, body, course_slug=course_slug)
 
 # ============================================================
 COOLDOWN_SESSION_HOURS = 6
 COOLDOWN_CART_HOURS = 12
 COOLDOWN_WISHLIST_HOURS = 24
+# Touchpoints that count for cooldowns. "signup" is not one: creating the CRM
+# contact at signup sends nothing, so it must not block the first follow-up.
+TOUCH_TRIGGERS = ("enquiry", "chat_callback", "cart_abandon", "checkout_abandon", "wishlist", "session_end")
 
 # ============================================================
 DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
@@ -47,11 +42,12 @@ def _profile_text(profile, key, default):
 
 
 def _course_label(slug):
-    return slug.replace("-", " ").title() if slug else "our programmes"
+    import catalog
+    return catalog.title_of(slug, "our programmes") if slug else "our programmes"
 
 
 # ============================================================
-# 🛒 CART ABANDONMENT JOB
+# 🛒 CART ABANDONMENT
 # ============================================================
 def cart_abandonment_job():
     try:
@@ -59,63 +55,39 @@ def cart_abandonment_job():
         print(f"[CART JOB] Found {len(carts)} carts")
         for item in carts:
             user_id = item["user_id"]
-            if db.recent_lead_exists(user_id, ("cart_abandon", "checkout_abandon"), COOLDOWN_CART_HOURS):
-                # one recovery email is enough — checkout-abandon already covers this cart
-                db.mark_cart_email_sent(item["cart_id"])
-                continue
-            profile = db.get_profile(user_id) or {}
-            purchases = db.get_purchases(user_id)
-            pred = score_user(user_id, source="cart_abandon",
-                              course=item.get("course_slug"), explain=True)
-            content = generate_content(
-                name=item["name"],
-                occupation=_profile_text(profile, "current_occupation", "Professional"),
-                specialization=_profile_text(profile, "specialization", "your field"),
-                course=item["course_title"],
-                action=pred["recommended_action"],
-                trigger="cart_abandon",
-                past_purchases=len(purchases),
-            )
-            lead_id = save_lead(user_id, pred, content, "cart_abandon", course_label=item["course_title"])
-            _send_tracked_email(user_id, lead_id, item["email"], content["email_subject"],
-                                content["email_body"], course_slug=item.get("course_slug"))
-            db.mark_cart_email_sent(item["cart_id"])
-            print(f"[CART JOB] {item['email']}: score {pred['lead_score']} -> {pred['recommended_action']}")
+            if not db.recent_lead_exists(user_id, ("cart_abandon", "checkout_abandon"), COOLDOWN_CART_HOURS):
+                handle_trigger(user_id, item["name"], item["email"], "cart_abandon", item.get("course_slug"))
+            db.mark_cart_email_sent(item["cart_id"])   # one follow-up per cart item
     except Exception as e:
         print("[CART JOB ERROR]", e)
 
 
 # ============================================================
-# ⏱ SESSION INACTIVE JOB (records a lead; no email)
+# ⏱ INACTIVITY (left the site) — the NBA decides whether to follow up at all
 # ============================================================
 def session_end_job():
     try:
         users = db.get_inactive_users(SESSION_INACTIVE_MINUTES)
-        print(f"[SESSION JOB] Found {len(users)} users")
+        print(f"[SESSION JOB] Found {len(users)} ended visit(s)")
         for user in users:
             user_id = user["user_id"]
-            if db.recent_lead_exists(user_id, None, COOLDOWN_SESSION_HOURS):
-                continue   # already has a fresh lead from another trigger
-            profile = db.get_profile(user_id) or {}
-            pred = score_user(user_id, source="session_end", explain=True)
-            slug = db.get_behaviour_summary(user_id).get("top_course_slug")
-            content = generate_content(
-                name=user["name"],
-                occupation=_profile_text(profile, "current_occupation", "Professional"),
-                specialization=_profile_text(profile, "specialization", "your field"),
-                course=_course_label(slug),
-                action=pred["recommended_action"],
-                trigger="session_end",
-                past_purchases=pred["raw"]["past_purchases"],
-            )
-            save_lead(user_id, pred, content, "session_end", course_label=_course_label(slug))
-            print(f"[SESSION JOB] {user['email']}: score {pred['lead_score']} -> {pred['recommended_action']}")
+            try:
+                if db.recent_lead_exists(user_id, TOUCH_TRIGGERS, COOLDOWN_SESSION_HOURS):
+                    continue   # this visit was already covered by another touchpoint
+                if db.get_purchases(user_id) and not db.get_cart(user_id):
+                    continue   # customers who just browse their course aren't chased
+                slug = db.get_behaviour_summary(user_id).get("top_course_slug")
+                if not slug:
+                    continue   # nothing they looked at — nothing useful to say
+                handle_trigger(user_id, user["name"], user["email"], "session_end", slug)
+            finally:
+                db.mark_visit_handled(user_id, user["session_id"])   # one decision per visit
     except Exception as e:
         print("[SESSION JOB ERROR]", e)
 
 
 # ============================================================
-# ⭐ WISHLIST JOB (INSIGHT EMAIL — NO COUPON)
+# ⭐ WISHLIST — information or a modest nudge, never the deepest discount
 # ============================================================
 def wishlist_job():
     try:
@@ -124,32 +96,16 @@ def wishlist_job():
         for user in users:
             user_id = user["user_id"]
             if db.recent_lead_exists(user_id, ("wishlist", "cart_abandon", "checkout_abandon"), COOLDOWN_WISHLIST_HOURS):
-                continue
-            profile = db.get_profile(user_id) or {}
-            wl = db.get_wishlist(user_id)
-            slug = wl[0]["course_slug"] if wl else None
-            title = wl[0]["course_title"] if wl else "your shortlisted course"
-            pred = score_user(user_id, source="wishlist", course=slug, explain=True)
-            content = generate_content(
-                name=user["name"],
-                occupation=_profile_text(profile, "current_occupation", "Professional"),
-                specialization=_profile_text(profile, "specialization", "your field"),
-                course=title,
-                action=pred["recommended_action"],
-                trigger="wishlist_viewed",
-                past_purchases=pred["raw"]["past_purchases"],
-            )
-            content["coupon_code"] = None  # insight email, no discount
-            lead_id = save_lead(user_id, pred, content, "wishlist", course_label=title)
-            _send_tracked_email(user_id, lead_id, user["email"], content["email_subject"],
-                                content["email_body"], course_slug=slug)
-            print(f"[WISHLIST JOB] {user['email']}: score {pred['lead_score']} -> {pred['recommended_action']}")
+                continue   # stays pending; reminded once the cooldown has passed
+            handle_trigger(user_id, user["name"], user["email"], "wishlist", user.get("course_slug"),
+                           allowed=["none", "email_info", "email_coupon_10", "whatsapp"])
+            db.mark_wishlist_reminded(user_id)   # one reminder per wishlist item
     except Exception as e:
         print("[WISHLIST JOB ERROR]", e)
 
 
 # ============================================================
-# 💳 CHECKOUT ABANDONMENT JOB
+# 💳 CHECKOUT ABANDONMENT
 # ============================================================
 def checkout_abandonment_job():
     try:
@@ -157,28 +113,11 @@ def checkout_abandonment_job():
         print(f"[CHECKOUT JOB] Found {len(sessions)} abandoned checkouts")
         for item in sessions:
             user_id = item["user_id"]
-            if db.recent_lead_exists(user_id, "checkout_abandon", COOLDOWN_CHECKOUT_HOURS):
-                db.mark_checkout_email_sent(item["checkout_id"])
-                continue
-            profile = db.get_profile(user_id) or {}
-            cart_items = db.get_cart(user_id)
-            slug = cart_items[0]["course_slug"] if cart_items else None
-            title = cart_items[0]["course_title"] if cart_items else "your selected course"
-            pred = score_user(user_id, source="checkout_abandon", course=slug, explain=True)
-            content = generate_content(
-                name=item["name"],
-                occupation=_profile_text(profile, "current_occupation", "Professional"),
-                specialization=_profile_text(profile, "specialization", "your field"),
-                course=title,
-                action=pred["recommended_action"],
-                trigger="checkout_abandon",
-                past_purchases=pred["raw"]["past_purchases"],
-            )
-            lead_id = save_lead(user_id, pred, content, "checkout_abandon", course_label=title)
-            _send_tracked_email(user_id, lead_id, item["email"], content["email_subject"],
-                                content["email_body"], course_slug=slug)
+            if not db.recent_lead_exists(user_id, "checkout_abandon", COOLDOWN_CHECKOUT_HOURS):
+                cart_items = db.get_cart(user_id)
+                slug = cart_items[0]["course_slug"] if cart_items else None
+                handle_trigger(user_id, item["name"], item["email"], "checkout_abandon", slug)
             db.mark_checkout_email_sent(item["checkout_id"])
-            print(f"[CHECKOUT JOB] {item['email']}: score {pred['lead_score']} -> {pred['recommended_action']}")
     except Exception as e:
         print("[CHECKOUT JOB ERROR]", e)
 

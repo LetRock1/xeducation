@@ -1,0 +1,181 @@
+{
+  "uplift_quality": {
+    "email_info": {
+      "corr_with_true_uplift": 0.679,
+      "mean_true_uplift_pts": 3.26,
+      "mean_pred_uplift_pts": 2.82
+    },
+    "email_coupon_10": {
+      "corr_with_true_uplift": 0.821,
+      "mean_true_uplift_pts": 6.08,
+      "mean_pred_uplift_pts": 6.54
+    },
+    "email_coupon_20": {
+      "corr_with_true_uplift": 0.873,
+      "mean_true_uplift_pts": 10.21,
+      "mean_pred_uplift_pts": 10.02
+    },
+    "call": {
+      "corr_with_true_uplift": 0.894,
+      "mean_true_uplift_pts": 5.3,
+      "mean_pred_uplift_pts": 4.95
+    },
+    "whatsapp": {
+      "corr_with_true_uplift": 0.648,
+      "mean_true_uplift_pts": 5.34,
+      "mean_pred_uplift_pts": 4.07
+    }
+  },
+  "policies": {
+    "No contact": {
+      "incremental_conversions_per_1000": 0.0,
+      "net_incremental_profit_per_1000_inr": 0.0,
+      "discount_given_per_1000_inr": 0.0,
+      "contact_cost_per_1000_inr": 0.0,
+      "calls_per_1000": 0.0,
+      "coupons_per_1000": 0.0,
+      "contacted_per_1000": 0.0
+    },
+    "Email everyone (no discount)": {
+      "incremental_conversions_per_1000": 30.1,
+      "net_incremental_profit_per_1000_inr": 1400533.0,
+      "discount_given_per_1000_inr": 0.0,
+      "contact_cost_per_1000_inr": 1845.0,
+      "calls_per_1000": 0.0,
+      "coupons_per_1000": 0.0,
+      "contacted_per_1000": 923.0
+    },
+    "20% coupon to everyone": {
+      "incremental_conversions_per_1000": 94.2,
+      "net_incremental_profit_per_1000_inr": 546857.0,
+      "discount_given_per_1000_inr": 3848015.0,
+      "contact_cost_per_1000_inr": 1845.0,
+      "calls_per_1000": 0.0,
+      "coupons_per_1000": 923.0,
+      "contacted_per_1000": 923.0
+    },
+    "Random action": {
+      "incremental_conversions_per_1000": 45.5,
+      "net_incremental_profit_per_1000_inr": 1030965.0,
+      "discount_given_per_1000_inr": 1076303.0,
+      "contact_cost_per_1000_inr": 16499.0,
+      "calls_per_1000": 100.0,
+      "coupons_per_1000": 358.0,
+      "contacted_per_1000": 764.0
+    },
+    "Tier playbook (rule-based workflow)": {
+      "incremental_conversions_per_1000": 38.2,
+      "net_incremental_profit_per_1000_inr": 904886.0,
+      "discount_given_per_1000_inr": 859310.0,
+      "contact_cost_per_1000_inr": 16656.0,
+      "calls_per_1000": 100.0,
+      "coupons_per_1000": 226.0,
+      "contacted_per_1000": 928.0
+    },
+    "Lead-score targeting (score-based CRM)": {
+      "incremental_conversions_per_1000": 40.0,
+      "net_incremental_profit_per_1000_inr": 1001634.0,
+      "discount_given_per_1000_inr": 852107.0,
+      "contact_cost_per_1000_inr": 16656.0,
+      "calls_per_1000": 100.0,
+      "coupons_per_1000": 281.0,
+      "contacted_per_1000": 928.0
+    },
+    "Next-best-action (ours, uplift)": {
+      "incremental_conversions_per_1000": 97.6,
+      "net_incremental_profit_per_1000_inr": 3520489.0,
+      "discount_given_per_1000_inr": 1080662.0,
+      "contact_cost_per_1000_inr": 16910.0,
+      "calls_per_1000": 100.0,
+      "coupons_per_1000": 462.0,
+      "contacted_per_1000": 918.0
+    },
+    "Next-best-action (flexible GBM challenger)": {
+      "incremental_conversions_per_1000": 92.0,
+      "net_incremental_profit_per_1000_inr": 3285963.0,
+      "discount_given_per_1000_inr": 1057772.0,
+      "contact_cost_per_1000_inr": 17129.0,
+      "calls_per_1000": 100.0,
+      "coupons_per_1000": 508.0,
+      "contacted_per_1000": 948.0
+    },
+    "Oracle (knows true effects)": {
+      "incremental_conversions_per_1000": 104.3,
+      "net_incremental_profit_per_1000_inr": 3890265.0,
+      "discount_given_per_1000_inr": 1002946.0,
+      "contact_cost_per_1000_inr": 17093.0,
+      "calls_per_1000": 100.0,
+      "coupons_per_1000": 416.0,
+      "contacted_per_1000": 944.0
+    }
+  },
+  "assumptions": {
+    "none": [
+      0.0,
+      0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "email_info": [
+      0.08,
+      0,
+      0.0,
+      0.0,
+      0.05,
+      0.0,
+      0.3,
+      0.0,
+      -0.05
+    ],
+    "email_coupon_10": [
+      0.15,
+      0,
+      0.6,
+      -0.2,
+      0.05,
+      -0.05,
+      0.1,
+      0.0,
+      0.0
+    ],
+    "email_coupon_20": [
+      0.25,
+      0,
+      1.0,
+      -0.2,
+      0.05,
+      -0.05,
+      0.1,
+      0.0,
+      0.0
+    ],
+    "call": [
+      0.1,
+      0,
+      0.0,
+      0.1,
+      0.9,
+      0.35,
+      0.0,
+      0.0,
+      -0.5
+    ],
+    "whatsapp": [
+      0.12,
+      0,
+      0.1,
+      0.0,
+      0.25,
+      0.0,
+      0.0,
+      0.15,
+      0.0
+    ]
+  },
+  "call_capacity": 0.1
+}

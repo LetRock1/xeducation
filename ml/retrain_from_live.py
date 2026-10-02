@@ -83,6 +83,19 @@ def load_real(db_path, window_days):
     return df.drop_duplicates(subset=["_user", "_day"], keep="last").reset_index(drop=True)
 
 
+def demo_note(db_path):
+    """Say so when the 'real' data includes simulated demo learners (seed-demo-data.bat)."""
+    try:
+        con = sqlite3.connect(db_path)
+        n = con.execute("SELECT COUNT(*) FROM users WHERE email LIKE '%@demo.xeducation.test'").fetchone()[0]
+        con.close()
+    except sqlite3.Error:
+        return
+    if n:
+        print(f"Note: includes {n} simulated demo learners (seed-demo-data.bat) whose purchases come from "
+              f"the simulator — this demonstrates the mechanism, not real-world performance.")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=DB_PATH)
@@ -92,6 +105,7 @@ def main():
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
 
+    demo_note(args.db)
     real = load_real(args.db, args.window_days)
     n_real = len(real)
     n_pos = int(real["Converted"].sum()) if n_real else 0

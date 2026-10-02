@@ -13,9 +13,12 @@ export default function RecommendedCourses() {
   useEffect(() => {
     getRecommendations()
       .then(r => {
-        const titles  = r.data.recommendations || []
-        const courses = titles
-          .map(t => COURSES.find(c => c.title === t))
+        const items = r.data.items || (r.data.recommendations || []).map(t => ({ title: t }))
+        const courses = items
+          .map(i => {
+            const c = COURSES.find(x => x.slug === i.slug || x.title === i.title)
+            return c ? { ...c, reason: i.reason } : null
+          })
           .filter(Boolean)
           .slice(0, 4)
         setRecs(courses)
@@ -52,6 +55,7 @@ export default function RecommendedCourses() {
               <p className="text-slate-500 text-xs">
                 {c.duration} · ₹{(c.price / 1000).toFixed(0)}K
               </p>
+              {c.reason && <p className="text-sky-700 text-[11px] mt-2 leading-snug">{c.reason}</p>}
             </div>
           </Link>
         ))}

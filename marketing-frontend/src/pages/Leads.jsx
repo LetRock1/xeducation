@@ -32,11 +32,13 @@ export default function Leads() {
         <div className="flex gap-2">
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, email, course…"
             className="inp w-64 text-sm"/>
-          <button onClick={() => setParams(p => { const n = new URLSearchParams(p); sort==='plv' ? n.delete('sort') : n.set('sort','plv'); return n })}
-            className={`px-4 py-2 rounded-xl text-sm font-medium transition-all
-              ${sort==='plv'?'bg-ember text-white':'bg-white/5 border border-white/10 text-slate-400 hover:border-white/30'}`}>
-            Sort by PLV
-          </button>
+          {[[null, 'Newest'], ['score', 'Score'], ['plv', 'Value']].map(([key, label]) => (
+            <button key={label} onClick={() => setParams(p => { const n = new URLSearchParams(p); key ? n.set('sort', key) : n.delete('sort'); return n })}
+              className={`px-3 py-2 rounded-xl text-sm font-medium transition-all
+                ${(sort || null) === key ? 'bg-ember text-white' : 'bg-white/5 border border-white/10 text-slate-400 hover:border-white/30'}`}>
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -57,7 +59,7 @@ export default function Leads() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-white/10 text-xs text-slate-500 uppercase tracking-wide">
-                {['Lead','Course','Occupation','Score','PLV','Tier','Trigger','Email','Detail'].map(h => (
+                {['Person','Course','Occupation','Score','Exp. value','Tier','Latest touch','Status','Detail'].map(h => (
                   <th key={h} className={`px-4 py-3 font-semibold ${h==='Detail'||h==='Score'?'text-center':'text-left'}`}>{h}</th>
                 ))}
               </tr>
@@ -73,23 +75,28 @@ export default function Leads() {
                 : leads.map(l => (
                   <tr key={l.id} className="hover:bg-white/[0.02] transition-colors">
                     <td className="px-4 py-3.5">
-                      <p className="font-semibold text-white">{l.name}</p>
+                      <p className="font-semibold text-white">{l.name}
+                        {l.email?.endsWith('@demo.xeducation.test') && <span className="ml-2 text-[10px] font-medium px-1.5 py-0.5 rounded bg-white/10 text-slate-400 align-middle" title="Simulated demo learner (seed-demo-data.bat)">simulated</span>}
+                      </p>
                       <p className="text-slate-500 text-xs">{l.email}</p>
                     </td>
                     <td className="px-4 py-3.5 text-slate-400 text-xs max-w-[130px] truncate">{l.course_type}</td>
                     <td className="px-4 py-3.5 text-slate-400 text-xs">{l.current_occupation}</td>
                     <td className="px-4 py-3.5 text-center">
-                      <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-bold ${SC(l.lead_score)}`}>{l.lead_score}</span>
+                      <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-bold ${SC(l.lead_score)}`}>{Math.round(l.lead_score)}</span>
                     </td>
-                    <td className="px-4 py-3.5 text-slate-400 text-xs">₹{(l.plv||0).toLocaleString()}</td>
+                    <td className="px-4 py-3.5 text-slate-400 text-xs">₹{Math.round(l.plv||0).toLocaleString()}</td>
                     <td className="px-4 py-3.5">
                       <span className={`inline-block text-xs px-2.5 py-1 rounded-full font-medium ${TC(l.recommended_action)}`}>
                         {l.recommended_action==='Nurture via Email/WhatsApp'?'Nurture':l.recommended_action==='Marketing Campaign'?'Campaign':l.recommended_action==='Target Immediately'?'Target Now':l.recommended_action}
                       </span>
                     </td>
-                    <td className="px-4 py-3.5 text-slate-500 text-xs">{l.trigger_reason}</td>
-                    <td className="px-4 py-3.5 text-center text-xs">
-                      {l.email_sent?<span className="text-green-400">✓ Sent</span>:<span className="text-slate-600">Pending</span>}
+                    <td className="px-4 py-3.5 text-slate-500 text-xs">{l.trigger_reason}{l.touches > 1 && <span className="text-slate-600"> · {l.touches} touches</span>}</td>
+                    <td className="px-4 py-3.5 text-center text-xs space-y-1">
+                      {l.purchases > 0 && <span className="block text-green-400">Customer</span>}
+                      {l.open_callbacks > 0 && <span className="block text-sky-accent">📞 Callback</span>}
+                      {l.do_not_email === 'Yes' && <span className="block text-slate-500">Unsubscribed</span>}
+                      {!l.purchases && !l.open_callbacks && l.do_not_email !== 'Yes' && (l.email_sent ? <span className="text-green-400">Emailed</span> : <span className="text-slate-600">—</span>)}
                     </td>
                     <td className="px-4 py-3.5 text-center">
                       <Link to={`/leads/${l.id}`} className="text-sky-accent text-xs hover:underline">View →</Link>
@@ -100,7 +107,7 @@ export default function Leads() {
             </tbody>
           </table>
         </div>
-        {leads.length > 0 && <div className="px-4 py-3 border-t border-white/10 text-slate-500 text-xs">{leads.length} leads shown</div>}
+        {leads.length > 0 && <div className="px-4 py-3 border-t border-white/10 text-slate-500 text-xs">{leads.length} people shown (one row per person — open a lead to see all their touchpoints)</div>}
       </div>
     </div>
   )

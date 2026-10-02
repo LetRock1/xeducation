@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { scheduleCampaign, getCampaigns, deleteCampaign } from '../utils/api'
+import { scheduleCampaign, getCampaigns, deleteCampaign, sendCampaignNow } from '../utils/api'
 
 const TIERS = [
+  'All leads',
   'Target Immediately',
   'Nurture via Email/WhatsApp',
   'Marketing Campaign',
@@ -27,11 +28,17 @@ export default function Campaigns() {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
+  async function sendNow(id) {
+    if (!window.confirm('Send this campaign to everyone in its audience now?')) return
+    try { const r = await sendCampaignNow(id); setMsg(r.data.message); load() }
+    catch (err) { setMsg('Error: ' + (err.response?.data?.detail || 'Failed to send')) }
+  }
+
   async function submit(e) {
     e.preventDefault(); setBusy(true); setMsg('')
     try {
-      await scheduleCampaign(form)
-      setMsg('Campaign scheduled successfully.')
+      const r = await scheduleCampaign(form)
+      setMsg(r.data.message)
       setForm(f => ({ ...f, name: '', subject: '', body: '', scheduled_at: '' }))
       load()
     } catch (err) {
@@ -89,8 +96,9 @@ export default function Campaigns() {
               <label className="lbl">Email Body *</label>
               <textarea required value={form.body} onChange={e => set('body', e.target.value)}
                 rows={6}
-                placeholder="Write the email body here. Use {name}, {course}, {coupon} as placeholders."
+                placeholder="Write the email body here. Placeholders: {first_name}, {name}, {course}"
                 className="inp font-mono text-xs" />
+              <p className="text-slate-500 text-[11px] mt-1">Each person gets their own first name and the course they were looking at. People who unsubscribed are skipped automatically, and every email gets a tracked button + unsubscribe link.</p>
             </div>
             <div>
               <label className="lbl">Schedule Date & Time *</label>
@@ -137,14 +145,14 @@ export default function Campaigns() {
                           c.sent
                             ? 'bg-green-900/30 text-green-400'
                             : 'bg-yellow-900/30 text-yellow-400'}`}>
-                          {c.sent ? 'Sent' : 'Scheduled'}
+                          {c.sent ? 'Sent' : c.status === 'sending' ? 'Sending…' : 'Scheduled'}
                         </span>
                       </div>
                       <p className="text-slate-400 text-xs mb-0.5">
                         Tier: {tierLabel(c.tier)}
                       </p>
                       <p className="text-slate-500 text-xs">
-                        {new Date(c.scheduled_at).toLocaleString('en-IN', {
+                        {new Date((c.scheduled_at || '').replace(' ', 'T')).toLocaleString('en-IN', {
                           day: 'numeric', month: 'short', year: 'numeric',
                           hour: '2-digit', minute: '2-digit'
                         })}
@@ -152,6 +160,17 @@ export default function Campaigns() {
                       <p className="text-slate-600 text-xs mt-1 truncate">
                         {c.subject}
                       </p>
+                      {c.sent ? (
+                        <p className="text-slate-400 text-xs mt-1.5">
+                          Delivered {c.delivered} · clicked {c.clicks} · bought within 14 days {c.conversions}
+                          {c.error && <span className="text-red-400"> · errors: {c.error}</span>}
+                        </p>
+                      ) : (
+                        <div className="flex items-center gap-3 mt-1.5">
+                          <span className="text-slate-500 text-xs">Audience now: {c.audience_now}</span>
+                          <button onClick={() => sendNow(c.id)} className="text-xs text-sky-accent hover:underline">Send now</button>
+                        </div>
+                      )}
                     </div>
                     {!c.sent && (
                       <button

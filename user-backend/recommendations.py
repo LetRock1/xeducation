@@ -145,39 +145,65 @@ SLUG_TO_TITLE = {
 }
 
 
-def get_recommendations(
-    occupation: str,
-    specialization: str,
-    viewed_slugs: list,
-    purchased_slugs: list,
-    limit: int = 4,
-) -> list:
-    scores = {c: 0 for c in ALL_COURSES}
+def recommend(occupation, specialization, viewed_slugs, purchased_slugs,
+              co_purchase=None, cart_slugs=(), limit=4):
+    """
+    Hybrid recommender. Each course gets points from:
+      * profile fit      — occupation / specialization knowledge maps above
+      * content affinity — same domain as courses the user looked at
+      * collaborative    — "learners who bought X also bought Y" (co_purchase counts)
+    Purchased and in-cart courses are excluded. Returns [{title, slug, reason}].
+    """
+    import catalog
+    scores, reasons = {}, {}
 
-    occ_recs  = OCCUPATION_MAP.get(occupation, [])
-    spec_recs = SPECIALIZATION_MAP.get(specialization, [])
+    def add(title, pts, why):
+        if title not in SLUG_TO_TITLE.values():
+            return
+        scores[title] = scores.get(title, 0) + pts
+        if pts > 0 and (title not in reasons or pts >= reasons[title][0]):
+            reasons[title] = (pts, why)
 
-    for i, c in enumerate(occ_recs):
-        if c in scores:
-            scores[c] += (len(occ_recs) - i) * 2
+    occ = OCCUPATION_MAP.get(occupation or "", [])
+    for i, t in enumerate(occ):
+        add(t, (len(occ) - i) * 2, f"Popular with {occupation}s")
+    spec = SPECIALIZATION_MAP.get(specialization or "", [])
+    for i, t in enumerate(spec):
+        add(t, (len(spec) - i) * 3, f"Fits a {specialization} background")
 
-    for i, c in enumerate(spec_recs):
-        if c in scores:
-            scores[c] += (len(spec_recs) - i) * 3
+    viewed_domains = {}
+    for slug in viewed_slugs or []:
+        c = catalog.get_course(slug)
+        if c:
+            viewed_domains[c["domain"]] = c["title"]
+    for c in catalog.all_courses():
+        if c["domain"] in viewed_domains:
+            add(c["title"], 6, f"Related to {viewed_domains[c['domain']]}, which you viewed")
 
-    for slug in purchased_slugs:
-        title = _slug_to_title(slug)
-        if title in scores:
-            scores[title] = -999
+    for slug, count in (co_purchase or {}).items():
+        t = _slug_to_title(slug)
+        add(t, 4 * count, "Learners who took your course also took this")
 
-    for slug in viewed_slugs:
-        title = _slug_to_title(slug)
-        if title in scores and scores[title] > 0:
-            scores[title] += 5
+    # don't recommend what they bought, already have in the cart, or are looking at right now
+    excluded = {_slug_to_title(s) for s in list(purchased_slugs or []) + list(cart_slugs or [])
+                + list(viewed_slugs or [])}
+    ranked = sorted(((t, sc) for t, sc in scores.items() if t not in excluded and sc > 0),
+                    key=lambda x: -x[1])
+    if not ranked:   # cold start: most popular courses
+        pop = sorted(catalog.all_courses(), key=lambda c: -c["enrolled"])
+        ranked = [(c["title"], 1) for c in pop if c["title"] not in excluded]
+        reasons = {t: (1, "Popular with all learners") for t, _ in ranked}
+    out = []
+    for t, _ in ranked[:limit]:
+        slug = next((s for s, title in SLUG_TO_TITLE.items() if title == t), None)
+        out.append({"title": t, "slug": slug, "reason": reasons.get(t, (0, ""))[1]})
+    return out
 
-    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    return [c for c, s in ranked if s > 0][:limit]
+
+def get_recommendations(occupation, specialization, viewed_slugs, purchased_slugs, limit=4):
+    """Titles only (kept for older callers)."""
+    return [r["title"] for r in recommend(occupation, specialization, viewed_slugs, purchased_slugs, limit=limit)]
 
 
 def _slug_to_title(slug: str) -> str:
-    return SLUG_TO_TITLE.get(slug, slug.replace("-", " ").title())
+    return SLUG_TO_TITLE.get(slug, (slug or "").replace("-", " ").title())

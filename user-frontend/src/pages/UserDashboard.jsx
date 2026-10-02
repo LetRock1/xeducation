@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link }                from 'react-router-dom'
-import { getDashboard, getLiveScore, removeFromWishlist } from '../utils/api'
+import { getDashboard, getInsights, removeFromWishlist } from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 
 function ScoreRing({ score }) {
@@ -21,11 +21,78 @@ function ScoreRing({ score }) {
   )
 }
 
+// "What our AI sees" — a demo/transparency panel. Real CRMs never show a customer
+// their lead score by default, so it is hidden behind a toggle.
+function AiInsights() {
+  const [show, setShow] = useState(() => { try { return localStorage.getItem('xe_demo_ai') === '1' } catch { return false } })
+  const [ins, setIns] = useState(null)
+  useEffect(() => {
+    try { localStorage.setItem('xe_demo_ai', show ? '1' : '0') } catch { /* ignore */ }
+    if (show) getInsights().then(r => setIns(r.data)).catch(() => {})
+  }, [show])
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl px-4 py-4">
+      <label className="flex items-center justify-between cursor-pointer">
+        <span>
+          <span className="block font-semibold text-navy text-sm">What our AI sees</span>
+          <span className="block text-slate-400 text-xs">Transparency / demo view</span>
+        </span>
+        <input type="checkbox" checked={show} onChange={e => setShow(e.target.checked)} className="w-4 h-4 accent-orange-500" />
+      </label>
+      {show && ins && (
+        <div className="mt-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <ScoreRing score={Math.round(ins.lead_score)} />
+            <div>
+              <p className="text-sm font-semibold text-navy">{ins.persona}</p>
+              <p className="text-xs text-slate-500">{ins.tier}</p>
+              <p className="text-[11px] text-slate-400">model {ins.model_version}</p>
+            </div>
+          </div>
+          {ins.tips?.length > 0 && (
+            <div className="bg-slate-50 rounded-lg px-3 py-2">
+              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">What would move this score</p>
+              <p className="text-xs text-slate-700 mt-0.5">{ins.tips[0].title}</p>
+              <p className="text-[11px] text-slate-500">{ins.tips[0].detail}</p>
+            </div>
+          )}
+          {ins.factors?.length > 0 && (
+            <ul className="space-y-1">
+              {ins.factors.map(f => (
+                <li key={f.factor} className="flex justify-between text-xs">
+                  <span className="text-slate-600">{f.factor}</span>
+                  <span className={f.points >= 0 ? 'text-green-600 font-semibold' : 'text-red-500 font-semibold'}>{f.impact}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function NextSteps({ data, profile }) {
+  const steps = data?.next_steps || []
+  if (!steps.length) return null
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl px-6 py-5 mb-6">
+      <h2 className="font-display font-bold text-navy text-lg mb-3">Your next steps</h2>
+      <div className="grid sm:grid-cols-2 gap-3">
+        {steps.map(s => (
+          <Link key={s.label} to={s.to} className="block border border-slate-200 rounded-xl px-4 py-3 hover:border-sky-accent transition-all">
+            <p className="font-medium text-navy text-sm">{s.label}</p>
+            <p className="text-slate-500 text-xs mt-0.5">{s.why}</p>
+          </Link>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function UserDashboard() {
   const { user, profile } = useAuth()
   const [data,       setData]       = useState(null)
-  const [liveScore,  setLiveScore]  = useState(null)
-  const [persona,    setPersona]    = useState(null)
   const [loading,    setLoading]    = useState(true)
 
   // Fetch main dashboard data (cart, wishlist, purchases, coupons)
@@ -35,16 +102,7 @@ export default function UserDashboard() {
       .catch(() => {})
       .finally(() => setLoading(false))
 
-  // Fetch live score separately
-  useEffect(() => {
-    load()
-    getLiveScore()
-      .then(r => {
-        setLiveScore(r.data.lead_score)
-        setPersona(r.data.persona)
-      })
-      .catch(() => {})
-  }, [])
+  useEffect(() => { load() }, [])
 
   async function removeWishlist(slug) {
     await removeFromWishlist(slug).catch(() => {})
@@ -57,8 +115,6 @@ export default function UserDashboard() {
     </div>
   )
 
-  // Use live score if available, otherwise fallback to null
-  const score = liveScore !== null ? Math.round(liveScore) : null
 
   return (
     <main className="min-h-screen bg-slate-50 pt-20 pb-16">
@@ -74,15 +130,7 @@ export default function UserDashboard() {
               {profile?.current_occupation || 'Complete your profile to get started'}
             </p>
           </div>
-          {score !== null && (
-            <div className="flex items-center gap-4 bg-white border border-slate-200 rounded-2xl px-5 py-3">
-              <ScoreRing score={score} />
-              <div>
-                <p className="font-display font-bold text-navy text-sm">Live Lead Score</p>
-                <p className="text-slate-500 text-xs">{persona || 'Calculating…'}</p>
-              </div>
-            </div>
-          )}
+
         </div>
 
         {/* Reward banner */}
@@ -102,6 +150,8 @@ export default function UserDashboard() {
             </Link>
           </div>
         )}
+
+        <NextSteps data={data} profile={profile} />
 
         {/* Profile incomplete banner */}
         {!profile?.profile_complete && (
@@ -210,8 +260,8 @@ export default function UserDashboard() {
             {[
               { label: 'View Cart', to: '/cart', sub: `${data?.cart?.length || 0} item${data?.cart?.length !== 1 ? 's' : ''}` },
               { label: 'Saved Courses', to: '/wishlist', sub: `${data?.wishlist?.length || 0} saved` },
-              { label: 'Browse Courses', to: '/courses', sub: 'Explore all 8 programmes' },
-              { label: 'Edit Profile', to: '/complete-profile', sub: 'Update your details' },
+              { label: 'Browse Courses', to: '/courses', sub: 'Explore all 24 programmes' },
+              { label: 'Settings', to: '/settings', sub: 'Profile, email & call preferences, password' },
             ].map(a => (
               <Link key={a.to} to={a.to}
                 className="block bg-white border border-slate-200 rounded-xl px-4 py-3.5
@@ -222,6 +272,8 @@ export default function UserDashboard() {
                 <p className="text-slate-400 text-xs mt-0.5">{a.sub}</p>
               </Link>
             ))}
+
+            <AiInsights />
 
             {/* Active coupons */}
             {data?.coupons?.length > 0 && (

@@ -74,19 +74,26 @@ if errorlevel 1 goto :fail
 call :setup_frontend marketing-frontend
 if errorlevel 1 goto :fail
 
-REM ---- Lead-scoring model: train it once with THIS venv's scikit-learn -----
-if exist "%ROOT%user-backend\ml_models\lead_model.pkl" goto :model_ok
-echo.
-echo ==== Training the lead-scoring model (first run only, ~30 s) ====
+REM ---- Course catalogue for the backend (prices etc. from courses.js) -----
 pushd "%ROOT%"
-"%ROOT%user-backend\venv\Scripts\python.exe" ml\train_model.py
-if errorlevel 1 (
-  popd
-  echo [WARN] Model training failed - the backend will use fallback scoring.
-  goto :model_ok
+node tools\sync-catalog.mjs
+popd
+
+REM ---- Models: train once with THIS venv's scikit-learn ---------------------
+pushd "%ROOT%"
+if not exist "user-backend\ml_models\lead_model.pkl" (
+  echo.
+  echo ==== Training the lead-scoring model - first run only, about 30 s ====
+  "user-backend\venv\Scripts\python.exe" ml\train_model.py
+  if errorlevel 1 echo [WARN] Lead model training failed - the backend will use fallback scoring.
+)
+if not exist "user-backend\ml_models\nba_model.pkl" (
+  echo.
+  echo ==== Training the next-best-action model - first run only, about 20 s ====
+  "user-backend\venv\Scripts\python.exe" ml\train_uplift.py
+  if errorlevel 1 echo [WARN] NBA model training failed - the backend will use its built-in prior.
 )
 popd
-:model_ok
 
 REM ---- Launch -------------------------------------------------------------
 echo.

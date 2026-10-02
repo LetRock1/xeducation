@@ -9,12 +9,12 @@ score_user(), so the model sees the same, correct inputs everywhere.
 """
 import json
 
+import catalog
 import database as db
 import ml_features as F
 from predict import predict_lead
 
-_DISCOUNTS = {"VIP_URGENT_25": 25, "FUTURE_READY_15": 15, "EARLY_BIRD_10": 10,
-              "LOYAL_20": 20, "LAST_CHANCE_30": 30}
+COUPON_VALID_HOURS = 72
 
 
 def build_raw(user_id, course=None, lead_source=None, whatsapp_opt_in=None):
@@ -71,9 +71,46 @@ def score_user(user_id, source, course=None, explain=False, snapshot_gap_minutes
     return pred
 
 
-def save_lead(user_id, pred, content, trigger, course_label=None):
+def interest_slug(user_id, explicit_slug=None):
+    """The course this lead is about: explicit > latest cart item > most viewed course."""
+    if explicit_slug and catalog.get_course(explicit_slug):
+        return explicit_slug
+    cart = db.get_cart(user_id)
+    if cart:
+        return cart[0]["course_slug"]
+    return db.get_behaviour_summary(user_id).get("top_course_slug")
+
+
+def issue_coupon(user_id, code, pct, tier):
+    """Give the user a personal coupon (one live copy per code)."""
+    if not code or not pct:
+        return
+    exists = db.fetchone("""SELECT id FROM coupons_issued WHERE user_id=? AND coupon_code=? AND used=0
+                            AND (expires_at IS NULL OR expires_at > datetime('now','localtime'))""",
+                         (user_id, code))
+    if exists:
+        return
+    db.execute("""INSERT INTO coupons_issued (user_id, coupon_code, discount_pct, tier, expires_at)
+                  VALUES (?,?,?,?,datetime('now','localtime',?))""",
+               (user_id, code, int(pct), tier, f"+{COUPON_VALID_HOURS} hours"))
+
+
+def _tips(pred):
+    """'How to convert' guidance for sales (see recourse.py)."""
+    try:
+        import recourse
+        return recourse.tips_for(pred["features"], pred["lead_score"])
+    except Exception as e:
+        print(f"[RECOURSE] skipped: {e}")
+        return []
+
+
+def save_lead(user_id, pred, content, trigger, course_label=None, course_slug=None):
     """Insert a lead row (with its explanation), issue the coupon, store PLV."""
     f = pred["features"]
+    course_slug = course_slug if catalog.get_course(course_slug) else None
+    if course_slug and not course_label:
+        course_label = catalog.title_of(course_slug)
     lead_id = db.execute("""
         INSERT INTO leads (
             user_id, lead_origin, lead_source, device_type,
@@ -83,8 +120,8 @@ def save_lead(user_id, pred, content, trigger, course_label=None):
             course_type, lead_score, conversion_probability, persona,
             customer_segment, recommended_action,
             email_subject, email_body, whatsapp_message, coupon_code, call_script,
-            trigger_reason, score_factors, model_version
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            trigger_reason, score_factors, model_version, course_slug, tips_json
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         user_id, f["LeadOrigin"], f["LeadSource"], f["DeviceType"],
         int(f["TotalVisits"]), int(f["TotalTimeOnWebsite"]), f["PageViewsPerVisit"],
@@ -96,39 +133,48 @@ def save_lead(user_id, pred, content, trigger, course_label=None):
         pred["customer_segment"], pred["recommended_action"],
         content.get("email_subject"), content.get("email_body"), content.get("whatsapp_message"),
         content.get("coupon_code"), content.get("call_script"),
-        trigger, json.dumps(pred.get("factors") or []), pred["model_version"],
+        trigger, json.dumps(pred.get("factors") or []), pred["model_version"], course_slug,
+        json.dumps(_tips(pred)),
     ))
 
-    code = content.get("coupon_code")
-    if code and _DISCOUNTS.get(code, 0) > 0:
-        db.execute("""
-            INSERT OR IGNORE INTO coupons_issued (user_id, coupon_code, discount_pct, tier, expires_at)
-            VALUES (?,?,?,?,datetime('now','localtime','+72 hours'))
-        """, (user_id, code, _DISCOUNTS[code], pred["recommended_action"]))
+    issue_coupon(user_id, content.get("coupon_code"), content.get("offer_pct"), pred["recommended_action"])
 
-    plv = db.compute_plv(user_id, pred["recommended_action"], pred["conversion_probability"])
+    plv = db.compute_plv(user_id, pred["recommended_action"], pred["conversion_probability"], course_slug)
     db.update_lead_plv(lead_id, plv)
     return lead_id
 
 
-def rescore_latest_lead(user_id, reason):
-    """Re-run the model for the user's latest lead row (email click, purchase...)."""
+def rescore_latest_lead(user_id, reason, snapshot_gap_minutes=0):
+    """Re-run the model and update the user's latest lead row in place
+    (activity, email click, purchase, manual). History is logged only for
+    meaningful moves, so the audit trail isn't flooded by page views."""
     lead = db.get_user_lead(user_id)
-    pred = score_user(user_id, source=reason, explain=True)
+    pred = score_user(user_id, source=reason, explain=True, snapshot_gap_minutes=snapshot_gap_minutes)
     if not lead:
         return None, pred
-    plv = db.compute_plv(user_id, pred["recommended_action"], pred["conversion_probability"])
+    slug = lead.get("course_slug") or interest_slug(user_id)
+    if slug and not lead.get("course_slug"):
+        db.execute("UPDATE leads SET course_slug=?, course_type=? WHERE id=?",
+                   (slug, catalog.title_of(slug), lead["id"]))
+    plv = db.compute_plv(user_id, pred["recommended_action"], pred["conversion_probability"], slug)
     f = pred["features"]
     db.execute("""
         UPDATE leads SET lead_score=?, conversion_probability=?, recommended_action=?,
                persona=?, customer_segment=?, plv=?, email_opened_count=?,
-               score_factors=?, model_version=?, decayed=0
+               total_visits=?, total_time_on_website=?, page_views_per_visit=?, sessions_count=?,
+               video_watched=?, brochure_downloaded=?, chat_initiated=?, pricing_page_visited=?,
+               testimonial_visited=?, webinar_attended=?, lead_source=?, device_type=?,
+               score_factors=?, model_version=?, tips_json=?, decayed=0
         WHERE id=?
     """, (pred["lead_score"], pred["conversion_probability"], pred["recommended_action"],
           pred["persona"], pred["customer_segment"], plv, int(f["EmailOpenedCount"]),
-          json.dumps(pred.get("factors") or []), pred["model_version"], lead["id"]))
-    if (round(lead["lead_score"] or 0, 2) != pred["lead_score"]
-            or lead["recommended_action"] != pred["recommended_action"]):
-        db.log_score_change(lead["id"], user_id, lead["lead_score"], pred["lead_score"],
+          int(f["TotalVisits"]), int(f["TotalTimeOnWebsite"]), f["PageViewsPerVisit"], int(f["TotalVisits"]),
+          f["VideoWatched"], f["BrochureDownloaded"], f["ChatInitiated"], f["PricingPageVisited"],
+          f["TestimonialVisited"], f["WebinarAttended"], f["LeadSource"], f["DeviceType"],
+          json.dumps(pred.get("factors") or []), pred["model_version"], json.dumps(_tips(pred)), lead["id"]))
+    old = lead["lead_score"] or 0
+    if lead["recommended_action"] != pred["recommended_action"] or abs(old - pred["lead_score"]) >= 5 \
+            or reason in ("purchase_conversion", "email_click", "manual_rescore"):
+        db.log_score_change(lead["id"], user_id, old, pred["lead_score"],
                             lead["recommended_action"], pred["recommended_action"], reason)
     return lead, pred

@@ -2,7 +2,9 @@ import { NavLink, useNavigate } from 'react-router-dom'
 
 const links = [
   { to:'/',          icon:'📊', label:'Dashboard'  },
+  { to:'/actions',   icon:'⚡', label:"Today's actions" },
   { to:'/leads',     icon:'🎯', label:'Leads'       },
+  { to:'/callbacks', icon:'📞', label:'Callbacks'   },
   { to:'/campaigns', icon:'📅', label:'Campaigns'   },
   { to:'/ab-tests',  icon:'🧪', label:'A/B Tests'   },
   { to:'/coupons',   icon:'🎟️', label:'Coupons'     },

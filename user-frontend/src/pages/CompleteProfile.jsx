@@ -3,11 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { completeProfile } from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 
-const OCCUPATIONS    = ['Working Professional','Student','Unemployed','Businessman','Housewife','Other']
-const SPECIALIZATIONS= ['Finance Management','Human Resource Management','Marketing Management','Operations Management','IT Projects Management','Supply Chain Management','Banking, Investment And Insurance','Travel and Tourism','Media and Advertising','Business Administration','E-Commerce','Retail Management','Healthcare Management','International Business','Services Excellence']
-const AGE_BRACKETS   = ['18-24','25-30','31-35','36-45','46+']
-const CITIES         = ['Mumbai','Pune','Delhi','Bangalore','Hyderabad','Chennai','Kolkata','Ahmedabad','Jaipur','Surat','Lucknow','Nagpur','Other']
-const HOW_HEARD      = ['Online Search','Word of Mouth','Social Media Ad','Friend/Colleague Referral','Email Newsletter','Webinar/Event','Other Website']
+import { OCCUPATIONS, SPECIALIZATIONS, AGE_BRACKETS, CITIES, HOW_HEARD } from '../data/profileOptions'
 
 export default function CompleteProfile() {
   const navigate = useNavigate()

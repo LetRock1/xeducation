@@ -17,6 +17,9 @@ import Wishlist             from './pages/Wishlist'
 import Checkout             from './pages/Checkout'
 import Enquiry              from './pages/Enquiry'
 import ThankYou             from './pages/ThankYou'
+import ForgotPassword       from './pages/ForgotPassword'
+import Settings             from './pages/Settings'
+import Brochure             from './pages/Brochure'
 
 captureSource()   // remember utm_source / referrer of the landing page
 
@@ -53,6 +56,9 @@ function AppShell() {
         <Route path="/"                 element={<Home />} />
         <Route path="/courses"          element={<Courses />} />
         <Route path="/courses/:slug"    element={<CourseDetail />} />
+        <Route path="/courses/:slug/brochure" element={<Protected><Brochure /></Protected>} />
+        <Route path="/forgot-password"  element={<ForgotPassword />} />
+        <Route path="/settings"         element={<Protected><Settings /></Protected>} />
         <Route path="/login"            element={<Login />} />
         <Route path="/signup"           element={<Signup />} />
         <Route path="/complete-profile" element={<Protected><CompleteProfile /></Protected>} />

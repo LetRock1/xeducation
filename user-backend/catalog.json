@@ -1,0 +1,998 @@
+[
+  {
+    "slug": "data-science-analytics",
+    "title": "Data Science & Analytics",
+    "domain": "Data Science & Analytics",
+    "tagline": "From raw data to revenue-driving insights",
+    "duration": "6 Months",
+    "level": "Intermediate",
+    "price": 45000,
+    "emi": 4200,
+    "rating": 4.8,
+    "enrolled": 12400,
+    "outcomes": [
+      "Python & SQL mastery",
+      "Machine Learning fundamentals",
+      "BI dashboards",
+      "Capstone project"
+    ],
+    "instructor": {
+      "name": "Dr. Arjun Sharma",
+      "role": "Ex-Google | IIT Bombay",
+      "exp": "14 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Python for Data Analysis"
+      },
+      {
+        "module": "Module 2",
+        "title": "Statistics & Probability"
+      },
+      {
+        "module": "Module 3",
+        "title": "Machine Learning"
+      },
+      {
+        "module": "Module 4",
+        "title": "Data Visualisation"
+      },
+      {
+        "module": "Module 5",
+        "title": "SQL & Databases"
+      },
+      {
+        "module": "Module 6",
+        "title": "Industry Capstone"
+      }
+    ]
+  },
+  {
+    "slug": "business-analytics",
+    "title": "Business Analytics",
+    "domain": "Data Science & Analytics",
+    "tagline": "Turn business data into strategic decisions",
+    "duration": "4 Months",
+    "level": "Intermediate",
+    "price": 38000,
+    "emi": 3600,
+    "rating": 4.7,
+    "enrolled": 8900,
+    "outcomes": [
+      "Excel & Power BI",
+      "Statistical analysis",
+      "Forecasting models",
+      "Dashboard reporting"
+    ],
+    "instructor": {
+      "name": "Priya Shetty",
+      "role": "Ex-Deloitte Analytics | NMIMS",
+      "exp": "12 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Excel & Power BI Mastery"
+      },
+      {
+        "module": "Module 2",
+        "title": "Statistical Foundations"
+      },
+      {
+        "module": "Module 3",
+        "title": "Predictive Analytics"
+      },
+      {
+        "module": "Module 4",
+        "title": "Business Intelligence Capstone"
+      }
+    ]
+  },
+  {
+    "slug": "ai-machine-learning",
+    "title": "AI & Machine Learning",
+    "domain": "Data Science & Analytics",
+    "tagline": "Build intelligent systems from first principles",
+    "duration": "8 Months",
+    "level": "Advanced",
+    "price": 65000,
+    "emi": 6000,
+    "rating": 4.9,
+    "enrolled": 5200,
+    "outcomes": [
+      "Deep learning & neural networks",
+      "NLP fundamentals",
+      "Computer vision",
+      "Model deployment"
+    ],
+    "instructor": {
+      "name": "Dr. Rohan Kaul",
+      "role": "Ex-Microsoft AI | IIT Delhi",
+      "exp": "16 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Advanced Python & Math for AI"
+      },
+      {
+        "module": "Module 2",
+        "title": "Neural Networks & Deep Learning"
+      },
+      {
+        "module": "Module 3",
+        "title": "NLP & Computer Vision"
+      },
+      {
+        "module": "Module 4",
+        "title": "Reinforcement Learning"
+      },
+      {
+        "module": "Module 5",
+        "title": "MLOps & Deployment"
+      },
+      {
+        "module": "Module 6",
+        "title": "Research Project"
+      }
+    ]
+  },
+  {
+    "slug": "digital-marketing",
+    "title": "Digital Marketing",
+    "domain": "Digital Marketing",
+    "tagline": "Build campaigns that convert, not just impress",
+    "duration": "4 Months",
+    "level": "Beginner–Advanced",
+    "price": 35000,
+    "emi": 3500,
+    "rating": 4.7,
+    "enrolled": 18900,
+    "outcomes": [
+      "SEO & SEM mastery",
+      "Social media strategy",
+      "Performance marketing",
+      "Content & email"
+    ],
+    "instructor": {
+      "name": "Riya Kapoor",
+      "role": "Ex-Dentsu | Marketing Director",
+      "exp": "11 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Digital Marketing Foundations"
+      },
+      {
+        "module": "Module 2",
+        "title": "SEO Mastery"
+      },
+      {
+        "module": "Module 3",
+        "title": "Google & Meta Ads"
+      },
+      {
+        "module": "Module 4",
+        "title": "Content & Analytics"
+      }
+    ]
+  },
+  {
+    "slug": "social-media-marketing",
+    "title": "Social Media Marketing",
+    "domain": "Digital Marketing",
+    "tagline": "Build brand authority across every platform",
+    "duration": "3 Months",
+    "level": "Beginner",
+    "price": 25000,
+    "emi": 2500,
+    "rating": 4.6,
+    "enrolled": 14200,
+    "outcomes": [
+      "Instagram & LinkedIn strategy",
+      "Organic content creation",
+      "Community management",
+      "Analytics & reporting"
+    ],
+    "instructor": {
+      "name": "Sana Mirza",
+      "role": "Ex-Ogilvy Social | Mumbai",
+      "exp": "9 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Platform Strategy & Content"
+      },
+      {
+        "module": "Module 2",
+        "title": "Growth & Engagement Tactics"
+      },
+      {
+        "module": "Module 3",
+        "title": "Analytics & Campaign Optimisation"
+      }
+    ]
+  },
+  {
+    "slug": "performance-marketing",
+    "title": "Performance Marketing",
+    "domain": "Digital Marketing",
+    "tagline": "Master paid media and measurable ROI",
+    "duration": "4 Months",
+    "level": "Intermediate",
+    "price": 40000,
+    "emi": 3800,
+    "rating": 4.8,
+    "enrolled": 9600,
+    "outcomes": [
+      "Google Ads advanced",
+      "Programmatic advertising",
+      "Attribution modelling",
+      "Budget optimisation"
+    ],
+    "instructor": {
+      "name": "Aditya Rao",
+      "role": "Ex-Google Ads Specialist | Bangalore",
+      "exp": "10 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Paid Search & Display"
+      },
+      {
+        "module": "Module 2",
+        "title": "Social Paid Media"
+      },
+      {
+        "module": "Module 3",
+        "title": "Programmatic & DSPs"
+      },
+      {
+        "module": "Module 4",
+        "title": "Analytics & Attribution"
+      }
+    ]
+  },
+  {
+    "slug": "mba-core",
+    "title": "MBA Core",
+    "domain": "MBA",
+    "tagline": "MBA-level thinking without the MBA price tag",
+    "duration": "12 Months",
+    "level": "Advanced",
+    "price": 120000,
+    "emi": 10500,
+    "rating": 4.9,
+    "enrolled": 8700,
+    "outcomes": [
+      "Strategic management",
+      "Financial modelling",
+      "Leadership & OB",
+      "Consulting frameworks"
+    ],
+    "instructor": {
+      "name": "Prof. Vikram Nair",
+      "role": "IIM Ahmedabad | Ex-McKinsey",
+      "exp": "20 years"
+    },
+    "curriculum": [
+      {
+        "module": "Term 1",
+        "title": "Finance & Accounting"
+      },
+      {
+        "module": "Term 2",
+        "title": "Marketing Management"
+      },
+      {
+        "module": "Term 3",
+        "title": "Strategy & Analytics"
+      },
+      {
+        "module": "Term 4",
+        "title": "Leadership & Capstone"
+      }
+    ]
+  },
+  {
+    "slug": "executive-mba",
+    "title": "Executive MBA Essentials",
+    "domain": "MBA",
+    "tagline": "Fast-track your leadership without leaving your job",
+    "duration": "6 Months",
+    "level": "Advanced",
+    "price": 75000,
+    "emi": 7000,
+    "rating": 4.7,
+    "enrolled": 4300,
+    "outcomes": [
+      "Corporate strategy",
+      "P&L management",
+      "Executive communication",
+      "Stakeholder management"
+    ],
+    "instructor": {
+      "name": "Dr. Kavya Menon",
+      "role": "Ex-KPMG Partner | ISB",
+      "exp": "18 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Business Strategy Essentials"
+      },
+      {
+        "module": "Module 2",
+        "title": "Financial Acumen for Leaders"
+      },
+      {
+        "module": "Module 3",
+        "title": "People & Organisational Leadership"
+      },
+      {
+        "module": "Module 4",
+        "title": "Executive Capstone"
+      }
+    ]
+  },
+  {
+    "slug": "mba-entrepreneurship",
+    "title": "MBA in Entrepreneurship",
+    "domain": "MBA",
+    "tagline": "Build, launch, and fund your own business",
+    "duration": "8 Months",
+    "level": "Advanced",
+    "price": 90000,
+    "emi": 8200,
+    "rating": 4.8,
+    "enrolled": 3100,
+    "outcomes": [
+      "Business model design",
+      "Fundraising & venture capital",
+      "Growth hacking",
+      "Legal & compliance basics"
+    ],
+    "instructor": {
+      "name": "Rahul Bose",
+      "role": "Serial Entrepreneur | 3 Exits | IIT Kharagpur",
+      "exp": "15 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Ideation & Business Model"
+      },
+      {
+        "module": "Module 2",
+        "title": "Product & Market Fit"
+      },
+      {
+        "module": "Module 3",
+        "title": "Fundraising & Finance"
+      },
+      {
+        "module": "Module 4",
+        "title": "Scaling & Exits"
+      }
+    ]
+  },
+  {
+    "slug": "supply-chain-management",
+    "title": "Supply Chain Management",
+    "domain": "Supply Chain Management",
+    "tagline": "Master the backbone of global business",
+    "duration": "5 Months",
+    "level": "Intermediate",
+    "price": 40000,
+    "emi": 3800,
+    "rating": 4.6,
+    "enrolled": 6200,
+    "outcomes": [
+      "Logistics & procurement",
+      "ERP basics",
+      "Demand forecasting",
+      "Lean & Six Sigma intro"
+    ],
+    "instructor": {
+      "name": "Sandeep Joshi",
+      "role": "Ex-Amazon SCM | BITS Pilani",
+      "exp": "16 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "SCM Fundamentals"
+      },
+      {
+        "module": "Module 2",
+        "title": "Procurement & Vendors"
+      },
+      {
+        "module": "Module 3",
+        "title": "Inventory & Logistics"
+      },
+      {
+        "module": "Module 4",
+        "title": "ERP & Technology"
+      },
+      {
+        "module": "Module 5",
+        "title": "Capstone"
+      }
+    ]
+  },
+  {
+    "slug": "logistics-operations",
+    "title": "Logistics & Operations",
+    "domain": "Supply Chain Management",
+    "tagline": "Optimise the flow of goods from factory to customer",
+    "duration": "4 Months",
+    "level": "Intermediate",
+    "price": 35000,
+    "emi": 3300,
+    "rating": 4.5,
+    "enrolled": 4800,
+    "outcomes": [
+      "Last-mile delivery",
+      "Warehouse management systems",
+      "Fleet optimisation",
+      "Cost reduction strategies"
+    ],
+    "instructor": {
+      "name": "Manoj Tiwari",
+      "role": "Ex-DHL Operations Head | IIT Roorkee",
+      "exp": "14 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Logistics Network Design"
+      },
+      {
+        "module": "Module 2",
+        "title": "Warehouse & Inventory"
+      },
+      {
+        "module": "Module 3",
+        "title": "Transport & Last Mile"
+      },
+      {
+        "module": "Module 4",
+        "title": "Digital Logistics Capstone"
+      }
+    ]
+  },
+  {
+    "slug": "procurement-sourcing",
+    "title": "Procurement & Strategic Sourcing",
+    "domain": "Supply Chain Management",
+    "tagline": "Cut costs and build resilient supplier networks",
+    "duration": "3 Months",
+    "level": "Beginner–Intermediate",
+    "price": 28000,
+    "emi": 2700,
+    "rating": 4.4,
+    "enrolled": 3200,
+    "outcomes": [
+      "Supplier evaluation & negotiation",
+      "Contract management",
+      "Category management",
+      "e-Procurement tools"
+    ],
+    "instructor": {
+      "name": "Nandita Roy",
+      "role": "Ex-Tata Steel Procurement | XLRI",
+      "exp": "13 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Procurement Fundamentals"
+      },
+      {
+        "module": "Module 2",
+        "title": "Supplier Management"
+      },
+      {
+        "module": "Module 3",
+        "title": "Strategic Sourcing Capstone"
+      }
+    ]
+  },
+  {
+    "slug": "hr-management",
+    "title": "HR Management",
+    "domain": "HR Management",
+    "tagline": "Lead people strategy in the modern enterprise",
+    "duration": "4 Months",
+    "level": "Beginner–Intermediate",
+    "price": 32000,
+    "emi": 3100,
+    "rating": 4.5,
+    "enrolled": 9300,
+    "outcomes": [
+      "Talent acquisition & HRIS",
+      "Performance management",
+      "Employment law basics",
+      "HR analytics"
+    ],
+    "instructor": {
+      "name": "Meera Pillai",
+      "role": "Ex-Infosys HR Head | XLRI",
+      "exp": "18 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "HR Strategy"
+      },
+      {
+        "module": "Module 2",
+        "title": "Recruitment & L&D"
+      },
+      {
+        "module": "Module 3",
+        "title": "Compensation & Payroll"
+      },
+      {
+        "module": "Module 4",
+        "title": "HR Analytics"
+      }
+    ]
+  },
+  {
+    "slug": "talent-acquisition",
+    "title": "Talent Acquisition & Recruitment",
+    "domain": "HR Management",
+    "tagline": "Find, attract, and retain the best talent",
+    "duration": "3 Months",
+    "level": "Beginner",
+    "price": 24000,
+    "emi": 2400,
+    "rating": 4.4,
+    "enrolled": 6700,
+    "outcomes": [
+      "Job design & JD writing",
+      "LinkedIn sourcing",
+      "Assessment centres",
+      "Offer & onboarding"
+    ],
+    "instructor": {
+      "name": "Sunita Das",
+      "role": "Ex-Wipro TA Head | Symbiosis",
+      "exp": "12 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Talent Strategy & Sourcing"
+      },
+      {
+        "module": "Module 2",
+        "title": "Screening & Assessment"
+      },
+      {
+        "module": "Module 3",
+        "title": "Offer, Onboarding & Retention"
+      }
+    ]
+  },
+  {
+    "slug": "hr-analytics",
+    "title": "HR Analytics & People Data",
+    "domain": "HR Management",
+    "tagline": "Drive workforce decisions with data, not instinct",
+    "duration": "4 Months",
+    "level": "Intermediate",
+    "price": 36000,
+    "emi": 3400,
+    "rating": 4.6,
+    "enrolled": 4100,
+    "outcomes": [
+      "Workforce analytics dashboards",
+      "Attrition modelling",
+      "Compensation benchmarking",
+      "HR KPIs & metrics"
+    ],
+    "instructor": {
+      "name": "Karan Shah",
+      "role": "Ex-Accenture People Analytics | IIM C",
+      "exp": "11 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "HR Metrics & Reporting"
+      },
+      {
+        "module": "Module 2",
+        "title": "Predictive People Analytics"
+      },
+      {
+        "module": "Module 3",
+        "title": "Workforce Planning"
+      },
+      {
+        "module": "Module 4",
+        "title": "HR Analytics Capstone"
+      }
+    ]
+  },
+  {
+    "slug": "finance-banking",
+    "title": "Finance & Banking",
+    "domain": "Finance & Banking",
+    "tagline": "From balance sheets to boardrooms",
+    "duration": "6 Months",
+    "level": "Intermediate–Advanced",
+    "price": 55000,
+    "emi": 5000,
+    "rating": 4.8,
+    "enrolled": 7100,
+    "outcomes": [
+      "Financial modelling & valuation",
+      "Investment banking basics",
+      "Risk management",
+      "CFA prep module"
+    ],
+    "instructor": {
+      "name": "Rajeev Mehta",
+      "role": "Ex-JPMorgan | CFA Charterholder",
+      "exp": "22 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Financial Statements"
+      },
+      {
+        "module": "Module 2",
+        "title": "Valuation & M&A"
+      },
+      {
+        "module": "Module 3",
+        "title": "Capital Markets"
+      },
+      {
+        "module": "Module 4",
+        "title": "Risk & Derivatives"
+      },
+      {
+        "module": "Module 5",
+        "title": "CFA Prep"
+      },
+      {
+        "module": "Module 6",
+        "title": "Placement Bootcamp"
+      }
+    ]
+  },
+  {
+    "slug": "financial-modelling",
+    "title": "Financial Modelling & Valuation",
+    "domain": "Finance & Banking",
+    "tagline": "Build models that investment bankers actually use",
+    "duration": "4 Months",
+    "level": "Intermediate",
+    "price": 45000,
+    "emi": 4200,
+    "rating": 4.9,
+    "enrolled": 5400,
+    "outcomes": [
+      "3-statement modelling",
+      "DCF & LBO models",
+      "Comparable company analysis",
+      "Excel & PowerPoint for finance"
+    ],
+    "instructor": {
+      "name": "Shreya Joshi",
+      "role": "Ex-Goldman Sachs IBD | CA",
+      "exp": "14 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Excel for Finance"
+      },
+      {
+        "module": "Module 2",
+        "title": "3-Statement Modelling"
+      },
+      {
+        "module": "Module 3",
+        "title": "Valuation Frameworks"
+      },
+      {
+        "module": "Module 4",
+        "title": "Deal Modelling Capstone"
+      }
+    ]
+  },
+  {
+    "slug": "investment-wealth",
+    "title": "Investment & Wealth Management",
+    "domain": "Finance & Banking",
+    "tagline": "Manage portfolios and guide financial decisions",
+    "duration": "5 Months",
+    "level": "Intermediate–Advanced",
+    "price": 48000,
+    "emi": 4500,
+    "rating": 4.7,
+    "enrolled": 3800,
+    "outcomes": [
+      "Portfolio construction",
+      "Equity & fixed income",
+      "Mutual funds & ETFs",
+      "Client advisory skills"
+    ],
+    "instructor": {
+      "name": "Vikram Bose",
+      "role": "Ex-HDFC Wealth | CFA Level 3",
+      "exp": "17 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Investment Fundamentals"
+      },
+      {
+        "module": "Module 2",
+        "title": "Equity & Fixed Income"
+      },
+      {
+        "module": "Module 3",
+        "title": "Portfolio Management"
+      },
+      {
+        "module": "Module 4",
+        "title": "Alternative Investments"
+      },
+      {
+        "module": "Module 5",
+        "title": "Client Advisory Capstone"
+      }
+    ]
+  },
+  {
+    "slug": "operations-management",
+    "title": "Operations Management",
+    "domain": "Operations Management",
+    "tagline": "Optimise every process, lead every team",
+    "duration": "5 Months",
+    "level": "Intermediate",
+    "price": 38000,
+    "emi": 3600,
+    "rating": 4.5,
+    "enrolled": 4800,
+    "outcomes": [
+      "Process optimisation",
+      "Project management intro",
+      "Quality management",
+      "Lean Six Sigma"
+    ],
+    "instructor": {
+      "name": "Prashant Kumar",
+      "role": "Ex-Mahindra | IIT Delhi",
+      "exp": "17 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Operations Strategy"
+      },
+      {
+        "module": "Module 2",
+        "title": "Project Management"
+      },
+      {
+        "module": "Module 3",
+        "title": "Quality & Six Sigma"
+      },
+      {
+        "module": "Module 4",
+        "title": "Manufacturing Ops"
+      },
+      {
+        "module": "Module 5",
+        "title": "Capstone"
+      }
+    ]
+  },
+  {
+    "slug": "project-management",
+    "title": "Project Management Professional",
+    "domain": "Operations Management",
+    "tagline": "Deliver projects on time, on budget, every time",
+    "duration": "4 Months",
+    "level": "Intermediate",
+    "price": 42000,
+    "emi": 4000,
+    "rating": 4.7,
+    "enrolled": 7200,
+    "outcomes": [
+      "PMP exam preparation",
+      "Agile & Scrum",
+      "Risk & stakeholder management",
+      "MS Project & Jira"
+    ],
+    "instructor": {
+      "name": "Anurag Singh",
+      "role": "PMP Certified | Ex-L&T Projects",
+      "exp": "15 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Project Initiation & Planning"
+      },
+      {
+        "module": "Module 2",
+        "title": "Execution & Control"
+      },
+      {
+        "module": "Module 3",
+        "title": "Agile & Scrum"
+      },
+      {
+        "module": "Module 4",
+        "title": "PMP Exam Prep Capstone"
+      }
+    ]
+  },
+  {
+    "slug": "lean-six-sigma",
+    "title": "Lean Six Sigma Green Belt",
+    "domain": "Operations Management",
+    "tagline": "Eliminate waste and achieve operational excellence",
+    "duration": "3 Months",
+    "level": "Intermediate",
+    "price": 30000,
+    "emi": 2900,
+    "rating": 4.5,
+    "enrolled": 3600,
+    "outcomes": [
+      "DMAIC methodology",
+      "Statistical process control",
+      "Root cause analysis",
+      "Green Belt certification prep"
+    ],
+    "instructor": {
+      "name": "Deepak Verma",
+      "role": "Ex-GE Operations | IIT Bombay",
+      "exp": "19 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Lean Principles & Waste Elimination"
+      },
+      {
+        "module": "Module 2",
+        "title": "Six Sigma & DMAIC"
+      },
+      {
+        "module": "Module 3",
+        "title": "Green Belt Certification Capstone"
+      }
+    ]
+  },
+  {
+    "slug": "e-commerce",
+    "title": "E-Commerce",
+    "domain": "E-Commerce",
+    "tagline": "Launch, scale, and profit in the digital marketplace",
+    "duration": "3 Months",
+    "level": "Beginner",
+    "price": 28000,
+    "emi": 2800,
+    "rating": 4.6,
+    "enrolled": 14200,
+    "outcomes": [
+      "Marketplace selling (Amazon, Flipkart)",
+      "D2C brand building",
+      "E-commerce analytics",
+      "Logistics & fulfilment"
+    ],
+    "instructor": {
+      "name": "Ankita Roy",
+      "role": "Ex-Flipkart | E-Commerce Consultant",
+      "exp": "10 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "E-Commerce Foundations"
+      },
+      {
+        "module": "Module 2",
+        "title": "Marketplace Strategy"
+      },
+      {
+        "module": "Module 3",
+        "title": "Marketing & Analytics"
+      }
+    ]
+  },
+  {
+    "slug": "d2c-brand-building",
+    "title": "D2C & Brand Building",
+    "domain": "E-Commerce",
+    "tagline": "Build a brand that sells directly and scales fast",
+    "duration": "4 Months",
+    "level": "Beginner–Intermediate",
+    "price": 35000,
+    "emi": 3300,
+    "rating": 4.7,
+    "enrolled": 8100,
+    "outcomes": [
+      "Shopify store setup",
+      "Brand identity & positioning",
+      "Email & SMS marketing",
+      "Customer retention"
+    ],
+    "instructor": {
+      "name": "Neha Sharma",
+      "role": "D2C Founder | Ex-Nykaa Digital",
+      "exp": "10 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Brand Strategy & Identity"
+      },
+      {
+        "module": "Module 2",
+        "title": "Shopify & Tech Stack"
+      },
+      {
+        "module": "Module 3",
+        "title": "Customer Acquisition"
+      },
+      {
+        "module": "Module 4",
+        "title": "Retention & Scaling"
+      }
+    ]
+  },
+  {
+    "slug": "marketplace-selling",
+    "title": "Marketplace Selling & Management",
+    "domain": "E-Commerce",
+    "tagline": "Dominate Amazon, Flipkart, and Meesho",
+    "duration": "3 Months",
+    "level": "Beginner",
+    "price": 22000,
+    "emi": 2200,
+    "rating": 4.5,
+    "enrolled": 11400,
+    "outcomes": [
+      "Listing optimisation",
+      "Advertising on Amazon & Flipkart",
+      "Account health management",
+      "Pricing strategy"
+    ],
+    "instructor": {
+      "name": "Rajiv Agarwal",
+      "role": "Amazon Seller Coach | Meesho Partner",
+      "exp": "8 years"
+    },
+    "curriculum": [
+      {
+        "module": "Module 1",
+        "title": "Marketplace Fundamentals"
+      },
+      {
+        "module": "Module 2",
+        "title": "Listing & Advertising"
+      },
+      {
+        "module": "Module 3",
+        "title": "Scaling & Account Management"
+      }
+    ]
+  }
+]

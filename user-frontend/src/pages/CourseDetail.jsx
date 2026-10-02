@@ -5,6 +5,7 @@ import { getCourseBySlug }  from '../data/courses'
 import { addToCart, addToWishlist } from '../utils/api'
 import { tracker, observeDwell } from '../utils/tracker'
 import ReviewSection        from '../components/ReviewSection'
+import CourseOverview       from '../components/CourseOverview'
 import QnASection           from '../components/QnASection'
 
 function LockGate({ message }) {
@@ -51,6 +52,7 @@ export default function CourseDetail() {
   const pricingRef = useRef(null)
   const testiRef   = useRef(null)
   const [videoPlayed,  setVideoPlayed]  = useState(false)
+  const [showVideo,    setShowVideo]    = useState(false)
   const [cartMsg,      setCartMsg]      = useState('')
   const [wishlistMsg,  setWishlistMsg]  = useState('')
 
@@ -66,13 +68,18 @@ export default function CourseDetail() {
 
   function handleVideo() {
     if (!user) { navigate('/login'); return }
+    setShowVideo(true)
+  }
+
+  // counts as "watched" only after half the overview has actually played
+  function handleHalfWatched() {
     if (!videoPlayed) { tracker.video(slug); setVideoPlayed(true) }
   }
 
   function handleBrochure() {
     if (!user) { navigate('/login'); return }
     tracker.brochure(slug)
-    alert(`Brochure for "${course.title}" — connect a real PDF in production.`)
+    navigate(`/courses/${slug}/brochure`)
   }
 
   async function handleCart() {
@@ -113,6 +120,7 @@ export default function CourseDetail() {
 
   return (
     <main className="min-h-screen bg-white pt-20">
+      {showVideo && <CourseOverview course={course} onClose={() => setShowVideo(false)} onHalfWatched={handleHalfWatched} />}
 
       {/* Hero */}
       <section className="relative bg-navy overflow-hidden py-16 px-6">
@@ -184,7 +192,7 @@ export default function CourseDetail() {
                 </div>
               </div>
               <p className="absolute bottom-4 left-4 text-white text-sm font-semibold">
-                Course overview · 3 min
+                Course overview · 35 sec
               </p>
               {!user && (
                 <div className="absolute top-3 right-3 bg-black/60 text-white text-xs px-2 py-1 rounded-full">
@@ -278,7 +286,7 @@ export default function CourseDetail() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
             </svg>
-            Download Course Brochure (PDF)
+            View & Download Brochure (PDF)
           </button>
         ) : (
           <div className="max-w-md mx-auto">

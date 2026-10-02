@@ -41,7 +41,7 @@ def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 
 
-def generate(n: int, seed: int = 42) -> pd.DataFrame:
+def generate(n: int, seed: int = 42, return_truth: bool = False) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
 
     # ── A. Profile (form fields) ────────────────────────────────────────
@@ -131,9 +131,10 @@ def generate(n: int, seed: int = 42) -> pd.DataFrame:
         - 0.45 * dne - 0.25 * dnc
         + rng.normal(0, 0.45, n)              # luck: timing, budget, mood of the call
     )
-    converted = (rng.random(n) < sigmoid(logit)).astype(int)
+    p_true = sigmoid(logit)
+    converted = (rng.random(n) < p_true).astype(int)
 
-    return pd.DataFrame({
+    df = pd.DataFrame({
         "LeadOrigin": origin, "LeadSource": source, "DeviceType": device,
         "CurrentOccupation": occ, "Specialization": spec, "CourseType": course,
         "City": city, "Country": country, "AgeBracket": age, "HowDidYouHear": heard,
@@ -146,6 +147,12 @@ def generate(n: int, seed: int = 42) -> pd.DataFrame:
         "WhatsAppOptIn": whatsapp, "DoNotEmail": dne, "DoNotCall": dnc,
         "Converted": converted,
     })[F.RAW_FEATURES + [F.TARGET]]
+    if return_truth:
+        # ground truth for simulation studies only (never available in real data):
+        # each lead's true no-contact purchase probability, including hidden intent
+        df["_p_true"] = p_true
+        df["_intent"] = intent          # hidden intent (used by the robustness study)
+    return df
 
 
 def main():

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
-import { login as loginApi } from '../utils/api'
+import { login as loginApi, resendOtp } from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 import { tracker } from '../utils/tracker'
 
@@ -11,10 +11,11 @@ export default function Login() {
   const [form,    setForm]    = useState({ email:'', password:'' })
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState('')
+  const [unverified, setUnverified] = useState(false)
   const from = location.state?.from || '/'
 
   async function handle(e) {
-    e.preventDefault(); setError(''); setLoading(true)
+    e.preventDefault(); setError(''); setUnverified(false); setLoading(true)
     try {
       const r  = await loginApi(form)
       const sid = r.data.session_id
@@ -22,7 +23,10 @@ export default function Login() {
       tracker.newSession()   // every login is a new visit, with real device + source
       if (!r.data.profile_complete) navigate('/complete-profile', { replace: true })
       else navigate(from, { replace: true })
-    } catch(err) { setError(err.response?.data?.detail || 'Login failed') }
+    } catch(err) {
+      setError(err.response?.data?.detail || 'Login failed')
+      setUnverified(err.response?.status === 403)
+    }
     finally { setLoading(false) }
   }
 
@@ -40,9 +44,24 @@ export default function Login() {
 
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow p-8">
           <form onSubmit={handle} className="space-y-4">
+            {location.state?.message && !error && (
+              <p className="text-green-700 text-sm bg-green-50 border border-green-200 rounded-xl px-3 py-2">{location.state.message}</p>
+            )}
             <div><label className="lbl">Email Address</label><input type="email" required value={form.email} onChange={e=>setForm(f=>({...f,email:e.target.value}))} placeholder="priya@gmail.com" className="inp"/></div>
             <div><label className="lbl">Password</label><input type="password" required value={form.password} onChange={e=>setForm(f=>({...f,password:e.target.value}))} placeholder="Your password" className="inp"/></div>
             {error && <p className="text-red-500 text-sm bg-red-50 border border-red-200 rounded-xl px-3 py-2">⚠️ {error}</p>}
+            {unverified && (
+              <button type="button" onClick={async () => {
+                  try { await resendOtp(form.email) } catch (e) { /* cooldown message shown on next page */ }
+                  navigate('/signup', { state: { email: form.email, step: 'otp' } })
+                }}
+                className="w-full text-sm border border-sky-accent text-sky-accent rounded-xl py-2 hover:bg-sky-accent/10">
+                Send me a new verification code
+              </button>
+            )}
+            <div className="text-right -mt-1">
+              <Link to="/forgot-password" className="text-xs text-slate-500 hover:text-sky-accent">Forgot password?</Link>
+            </div>
             <button type="submit" disabled={loading} className="w-full btn-primary mt-2">{loading ? 'Logging in…' : 'Login →'}</button>
           </form>
         </div>

@@ -1,212 +1,272 @@
-# X Education — New Features: How They Work, How to Test, How to Demo
+# X Education — Feature guide
 
-For the team. Assumes the 4 servers are running (see `new.txt` Part 4):
+What every feature does, how it works, and how to test it. For the models and their
+evaluation see [ML_PIPELINE.md](ML_PIPELINE.md); for a ready-made demo run see [DEMO.md](DEMO.md).
 
-| Service | Port | Note |
+| Service | Address | What it is |
 |---|---|---|
-| user-backend | 8000 | `DEMO_MODE=true` in `.env` shrinks all wait-times to 1–2 min |
-| marketing-backend | 8001 | login: `admin@xeducation.in` / `123` |
-| user-frontend | 5173 | the student-facing site |
-| marketing-frontend | 5174 | the marketing dashboard |
+| Learner website | <http://localhost:5173> | where learners browse, sign up and buy |
+| Marketing dashboard | <http://localhost:5174> | the sales & marketing workspace (log in with `MARKETING_EMAIL` / `MARKETING_PASSWORD` from `marketing-backend/.env`) |
+| User API | <http://localhost:8000/docs> | accounts, tracking, scoring, next-best-action, automations |
+| Marketing API | <http://localhost:8001/docs> | CRM: leads, actions, campaigns, A/B tests, model health |
 
-All background jobs run every 5 minutes on a timer. To skip waiting, hit
-`POST http://localhost:8000/api/debug/trigger-jobs` — it force-runs every job
-immediately (cart, checkout, session, wishlist abandonment).
+**Demo mode** (`DEMO_MODE=true` in both `.env` files, the default): automations fire 1 minute
+after a cart / checkout / wishlist / visit goes quiet (instead of 15–60 min), and leads decay
+after 10 minutes of inactivity (instead of 7 days). The automation timer runs every 5 minutes;
+to skip the wait press **⚡ Run automations now** on the dashboard.
 
----
-
-## 1. Checkout Abandonment
-
-**What it does:** If a student reaches checkout but doesn't pay, they get a
-follow-up email with the deepest discount we offer (`LAST_CHANCE_30`, 30%
-off).
-
-**How it works:**
-1. Student opens `/checkout` → frontend silently calls `POST /api/checkout/start`, which writes a row to `checkout_sessions`.
-2. If `POST /api/checkout` (the "Pay Now" button) is never called, that session sits `completed=0`.
-3. Every 5 min, `checkout_abandonment_job()` (`user-backend/scheduler.py`) looks for sessions older than `CHECKOUT_ABANDON_MINUTES` (1 min in demo mode) that are still incomplete, scores the lead, generates the email, and sends it.
-4. A new lead row appears in the marketing dashboard with `trigger_reason = checkout_abandon`.
-
-**Manual test:**
-1. Log into the user site (5173), add a course to cart, go to `/checkout`.
-2. **Don't click Pay Now.** Wait ~1 min (demo mode) or call the debug endpoint:
-   ```
-   POST http://localhost:8000/api/debug/trigger-jobs
-   ```
-3. Open marketing dashboard (5174) → Leads → filter by trigger `checkout_abandon`.
-
-**Expected outcome:** A new lead with `trigger_reason: checkout_abandon`, tier is at least "Nurture" (business rule floors it at 62+), coupon code `LAST_CHANCE_30`. Check the inbox for the email — it should mention "one click from completing checkout."
-
-**Quick demo:** Add to cart → go to checkout → don't pay → hit `/api/debug/trigger-jobs` → refresh Leads page → point at the new lead and the urgency-toned email with the 30% coupon.
+**Emails**: with `GMAIL_USER` / `GMAIL_APP_PASSWORD` set they are really sent; otherwise every
+email (including OTP codes) is printed in the user-backend window as `[EMAIL MOCK] …`.
 
 ---
 
-## 2. Closed-Loop Email Open/Click Tracking
+## A. Learner website
 
-**What it does:** Every marketing email has an invisible tracking pixel and a
-tracked "View Course" button. Opening or clicking the email bumps the lead's
-score in real time — this is what "closed-loop" means (send → engage →
-re-score).
+### A1. Sign-up with email code, login, password reset
+* **What it does** — accounts are verified with a 6-digit code; forgotten passwords are reset
+  with a code; logged-in users can change their password in Settings.
+* **How it works** — `/api/auth/signup` → code by email (valid 10 min, 5 wrong tries burn it,
+  resend after 60 s) → `/api/auth/verify-otp` creates the account **and a CRM lead**
+  (so every learner appears in the dashboard immediately). `/api/auth/forgot-password` never
+  reveals whether an email is registered.
+* **How to test** — 1. Sign up on the website. 2. Enter the code from your inbox (or the
+  `[EMAIL MOCK]` line). 3. In the dashboard → **Leads**, the person appears with trigger
+  `signup`. 4. Log out → **Forgot password?** → reset with the new code → log in.
+* **Expected** — wrong codes are rejected; "resend" is blocked for 60 s; the password change
+  works with the new password only.
 
-**How it works:**
-1. Whenever an email is sent (cart/checkout/wishlist jobs, enquiry
-   confirmation, or a manual send from the dashboard), a unique `token` is
-   generated and logged in `email_sends`.
-2. The email HTML gets two things: `<img src=".../track/open/{token}.gif">`
-   (invisible, loads when the email client renders images) and a CTA button
-   linking through `.../track/click/{token}?to=<course url>`.
-3. Opening the pixel hits `GET /api/mkt/track/open/{token}.gif` on
-   marketing-backend (no login needed — it's a public endpoint, since email
-   clients can't send auth headers). This increments `open_count` and adds
-   **+3** to the lead's score.
-4. Clicking the CTA hits `GET /api/mkt/track/click/{token}`, adds **+7** to
-   the score, and redirects the browser to the real destination.
+### A2. Complete profile and Settings
+* **What it does** — occupation, specialisation, city, age bracket, phone; communication
+  preferences (email, calls, WhatsApp) and password change.
+* **How it works** — `/api/profile/complete`, `/api/profile/preferences`. Consent is used
+  everywhere: opted-out learners are never emailed or called, WhatsApp needs an opt-in and a
+  phone number.
+* **How to test** — **Settings** → untick email → save. Trigger any automation for this
+  learner (A5/B1): no email is sent; the next-best-action picks a different channel or nothing.
 
-**Manual test (no need to wait for a real email client):**
-1. Send any lead an email from the dashboard (LeadDetail → Email tab → Send).
-2. Open the marketing-backend logs or query `email_sends` for the token, OR just note the lead's current score.
-3. Simulate an "open" by visiting in a browser:
-   ```
-   http://localhost:8001/api/mkt/track/open/<token>.gif
-   ```
-4. Refresh the lead in the dashboard — score should be +3.
-5. Visit the click URL from the email body (or `.../track/click/<token>?to=http://localhost:5173`) — score should be +7 more, and your browser should redirect to the course page.
+### A3. Silent behaviour tracking
+* **What it does** — measures what the model needs: visits (a new visit after 30 minutes idle),
+  time on each page, pages per visit, device, traffic source (`utm_source` / referrer), and
+  intent signals: overview video watched (counts after half of it has played), pricing and
+  testimonials (only after **4 s actually in view**), brochure, chat, webinar seat, wishlist,
+  cart, checkout, enquiry.
+* **How it works** — `user-frontend/src/utils/tracker.js` → `/api/track`; each event re-scores
+  the learner's lead row (`scoring.rescore_latest_lead`) and stores a score snapshot for the
+  closed loop.
+* **How to test** — log in, open a course, scroll to **Pricing** and wait 4 s, watch the
+  **Course overview · 35 sec**. Open the lead in the dashboard → **Activity**: the events and
+  the score change; **Why this score?** lists "Spent time on pricing +x pts", etc.
 
-**Expected outcome:** `email_sends.open_count`/`click_count` increment, `leads.lead_score` rises, a row appears in `lead_score_history` with reason `email_open`/`email_click`.
+### A4. Course page, overview, brochure, reviews, Q&A
+* **What it does** — course details from the catalogue; a 35-second overview (5 slides);
+  a printable brochure page (**Download PDF** = the browser's Save-as-PDF); reviews (only
+  enrolled learners may review); questions answered by the team (B6/D9).
+* **How to test** — open any course → **Course overview**; brochure → **Download PDF**; ask a
+  question in Q&A; try to review a course you have not bought (refused).
 
-**Quick demo:** Send an email from LeadDetail → open the tracking pixel URL in a new tab → refresh LeadDetail → show the score ticked up live. This is the single best "wow" moment for the demo — it's the thing HubSpot/Salesforce don't expose to the end customer.
+### A5. Enquiry
+* **What it does** — the learner asks about a course (optional phone + WhatsApp opt-in). They
+  always get a confirmation email; the next-best-action engine decides whether it carries a
+  10 % or 20 % coupon or whether an advisor should call.
+* **How it works** — `/api/enquiry` → `playbook.handle_trigger(..., "enquiry")` (see C2).
+* **How to test** — **Enquire Now** on a course → submit. Dashboard → **Leads** → open the
+  person → **Recommended action** shows the decision, the options it compared and why.
 
----
+### A6. Wishlist, cart, checkout and coupons
+* **What it does** — save for later, cart priced from the catalogue (prices sent by the browser
+  are ignored), coupon preview before paying, simulated payment by UPI or card (card numbers
+  are checked with the Luhn algorithm — use `4242 4242 4242 4242`; nothing is charged).
+* **How it works** — `/api/cart`, `/api/wishlist`, `/api/checkout/start` (records the checkout
+  for abandonment), `/api/coupons/check`, `/api/checkout`. Coupons are personal (issued to one
+  learner), expire after 72 h and work once. A purchase labels the learner's earlier score
+  snapshots and decisions as **converted** (closed loop) and the confirmation email says which
+  touchpoint the purchase is attributed to.
+* **How to test** — add a course → **Checkout** → your offers appear as buttons → **Apply** →
+  the total drops → pay with the test card → thank-you page; the dashboard shows the purchase,
+  revenue and the lead as Customer.
 
-## 3. Lead Decay / Re-scoring
+### A7. Chat assistant and callback requests
+* **What it does** — an automated assistant (clearly labelled) answers fees, duration,
+  syllabus, instructors, refunds and "which course suits me?" from the catalogue; "Talk to an
+  advisor" opens a **Request callback** form.
+* **How it works** — `/api/chat` (intent rules + course matcher in `assistant.py`; optional
+  Gemini with `GEMINI_API_KEY`); `/api/callback` saves the request, records it as an
+  enquiry-type signal and creates a lead. Transcripts are visible to sales (D3).
+* **How to test** — open the chat bubble, ask "what are the fees for data science?", then
+  "talk to an advisor" → submit a phone number → dashboard **Callbacks** shows it.
 
-**What it does:** If a hot lead goes quiet (no site activity, no email
-opens) for a while, they automatically get downgraded a tier instead of
-sitting in the "call immediately" queue forever.
-
-**How it works:**
-1. Every 5 min, `lead_decay_job()` (`marketing-backend/decay.py`) checks every lead that isn't already "Low Priority".
-2. It compares "now" against the lead's most recent activity: `created_at`, latest `behaviour_events`, or latest email open.
-3. If that's older than `DECAY_INACTIVITY_MINUTES` (2 min in demo mode, 7 days in production), the tier drops one step: `Target Immediately → Nurture → Marketing Campaign → Low Priority`.
-4. Logged to `lead_score_history` with reason `decay`; `leads.decayed=1` so it only decays once per lead.
-
-**Manual test:**
-1. Create a "Target Immediately" lead (e.g. submit an enquiry with high engagement, or use an existing one).
-2. Do nothing with that user for ~2 minutes (demo mode).
-3. Wait for the scheduler tick (up to 5 min) — there's no debug-trigger for this one, since it's on marketing-backend's own scheduler, not user-backend's. Just wait, or watch the marketing-backend console for `[DECAY JOB] Downgraded N lead(s)`.
-4. Refresh the lead in the dashboard.
-
-**Expected outcome:** `recommended_action` moved down one tier, `decayed=1`, new row in `lead_score_history` with reason `decay`.
-
-**Quick demo:** Show a lead's tier before, explain the console log line printing every 5 min, then show the tier after the wait — frames it as "the system doesn't let stale leads clog the priority queue."
-
----
-
-## 4. Explainability ("Why this score?")
-
-**What it does:** A plain-English breakdown of what drove a lead's score,
-instead of a black-box number.
-
-**How it works:** `marketing-backend/explain.py` reads the lead's stored
-signals (video watched, brochure downloaded, chat opened, trigger reason,
-occupation, etc.) and reconstructs the same business rules `predict.py`
-applies, as a list of factors with a plain description and impact.
-
-**Manual test:**
-1. Open any lead in the dashboard → LeadDetail → click the **"Why this score?"** tab.
-   — or —
-   ```
-   GET http://localhost:8001/api/mkt/leads/{id}/explain
-   Authorization: Bearer <token from /api/mkt/login>
-   ```
-
-**Expected outcome:** A list of factors, e.g. "Downloaded brochure — +25 engagement, +3 intent", "Cart abandonment — floor 62", "Occupation dampening — cap 72, ×0.85". At minimum one factor always appears (falls back to "Baseline browsing" if nothing else fired).
-
-**Quick demo:** Open a high-score lead, click the tab, read out 2-3 factors — this is your answer to "how do we know the AI isn't just guessing."
-
----
-
-## 5. Attribution
-
-**What it does:** Shows the full path a user took before becoming a lead or
-converting — first touch, last touch before purchase, and everything in
-between (page views, emails, clicks, purchase).
-
-**How it works:** `GET /api/mkt/leads/{id}/attribution` merges four sources
-by timestamp: `behaviour_events`, `email_sends` (opens/clicks), the lead's
-own creation event, and `purchases`. Also `GET /api/mkt/campaign-influence`
-aggregates, per trigger reason, how many opens/clicks led to a purchase
-within 7 days — feeds the Dashboard's "Campaign Influence" chart.
-
-**Manual test:**
-1. LeadDetail → **Attribution** tab for any lead with some behaviour history.
-2. Dashboard → scroll to the "Campaign Influence" chart (only shows once there's at least one email send in the system).
-
-**Expected outcome:** A chronological timeline (page views → email opens/clicks → lead created → purchase if any), with First Touch / Last Touch Before Purchase summary boxes at the top.
-
-**Quick demo:** Pick a lead who has browsed, gotten an email, and clicked it — walk through their timeline top to bottom as "this is the exact path that led to the sale."
+### A8. Learner dashboard
+* **What it does** — courses, cart, saved courses, active offers, **Your next steps**
+  (personalised, ranked by the model — e.g. "Join Saturday's free live session", "Get the MBA
+  Core brochure"), recommended courses with the reason, and an optional **What our AI sees**
+  panel (*Transparency / demo view*: the learner's own score, factors and the step that would
+  move it most). The score is hidden unless that panel is switched on.
+* **How it works** — `/api/dashboard` (`recourse.learner_steps`), `/api/recommendations`
+  (profile + viewed + co-purchases, never recommends what you own or have in the cart),
+  `/api/me/insights`.
 
 ---
 
-## 6. A/B Testing
+## B. Automations (run every 5 minutes, or **⚡ Run automations now**)
 
-**What it does:** Lets marketing test two subject/body variants against a
-tier of leads and see which one performs better (by open rate).
+Each trigger scores the learner, asks the **next-best-action** engine what to do (C2), and
+then sends the chosen email, or creates a call / WhatsApp task in **Today's actions**, or does
+nothing. Every decision is logged with its probability so it can be evaluated (C4).
 
-**How it works:**
-1. Dashboard → **A/B Tests** page → fill in Variant A and Variant B subject/body + target tier → Create.
-2. Click **Send to Matching Leads** — every lead currently in that tier is randomly assigned variant A or B (50/50), each gets its own tracked `email_sends` row (`variant`, `ab_test_id`).
-3. Open/click tracking (feature #2) does the rest — opens and clicks get attributed back to the right variant.
-4. Click **View Results** — shows sent/opened/clicked and open-rate per variant. A winner is only declared once both variants have ≥5 sends (avoids calling it on tiny samples).
+| Trigger | Fires when (demo / normal) | Once per | Actions allowed |
+|---|---|---|---|
+| Checkout left | checkout started, not paid for 1 / 30 min | checkout | all |
+| Cart left | course in cart for 1 / 60 min | cart item | all |
+| Wishlist cold | saved for 1 / 30 min, not bought | wishlist item | nothing, info email, 10 % coupon, WhatsApp |
+| Visit ended | no activity for 1 / 15 min, visit in the last 48 h, a course was viewed | visit | all |
+| Enquiry | form submitted | enquiry | info / coupon email, call (an email is always sent) |
 
-**Manual test:**
-1. Create a test targeting a tier that has a few leads in it (check the dashboard tier counts first).
-2. Send it.
-3. Manually "open" a few of the resulting `email_sends` tokens via the tracking pixel URL (see feature #2) to simulate opens.
-4. View Results — confirm the numbers reflect what you just did.
+Cool-downs stop pile-ups: no cart follow-up within 12 h of another cart/checkout touch, no
+wishlist one within 24 h, no visit follow-up within 6 h of any touchpoint. Customers who are
+only browsing their own course are not chased.
 
-**Expected outcome:** `variant_a`/`variant_b` sent/opened/clicked counts, `open_rate`/`click_rate`, and (once ≥5 sends each) a `winner`.
+### B1. Testing an automation
+1. On the website: log in, open a course for a minute, add it to the cart, open **Checkout**
+   and leave without paying.
+2. Wait one minute, then press **⚡ Run automations now** on the dashboard. The panel lists
+   each decision ("Priya · checkout abandon → call").
+3. Open the lead → **Recommended action** (the decision and every option's expected profit),
+   **Email** (the email text) or **Today's actions** (the call task).
 
-**Quick demo:** Create a test with an obviously punchier Variant B subject, send it, open a couple of B's pixels manually, show B pulling ahead in Results.
+### B2. Tracked emails and one-click unsubscribe
+* Every marketing email has a tracked **View Course** button (click → `/api/mkt/track/click`
+  → the course page, only ever on our own site) and an unsubscribe link (+ `List-Unsubscribe`
+  header). A click re-scores the learner with the model (clicked emails are a model signal).
+  There is no hidden tracking pixel.
+* **Test** — open an email's button link: the lead's **Emails** list shows the click and its
+  score history logs `email_click`. Open the unsubscribe link: a confirmation page appears and
+  no further marketing emails go to that learner.
 
----
-
-## 7. Predictive Lifetime Value (PLV)
-
-**What it does:** Ranks leads not just by how likely they are to convert,
-but by how much money they're worth — total already spent, plus a
-projected future value based on tier and conversion probability.
-
-**How it works:** `compute_plv(user_id, tier, conversion_probability)` =
-money already spent (`SUM(purchases.price_paid)`) + `avg_course_price ×
-conversion_probability × tier_multiplier` (multiplier: Target Immediately
-1.5, Nurture 1.0, Campaign 0.6, Low Priority 0.2). Recomputed and saved to
-`leads.plv` whenever a lead is created or re-tiered by the decay job.
-
-**Manual test:**
-1. Leads page → click **Sort by PLV** — list re-orders by `plv` descending.
-2. Dashboard → **Priority Queue (High PLV)** quick-link card → shows leads ranked by `lead_score × plv`.
-3. Or directly: `GET /api/mkt/priority-queue`.
-
-**Expected outcome:** Leads with purchase history or high-tier + high
-conversion probability sort to the top; a fresh, low-engagement lead shows
-a low PLV (often near 0 if they haven't purchased anything and are Low
-Priority tier).
-
-**Quick demo:** Sort Leads by PLV, point out the top lead's number, open
-LeadDetail and show the PLV figure in the profile card — frame it as "not
-just who's hot, but who's worth chasing."
+### B3. Lead decay
+* A lead with no activity for 10 min (demo) / 7 days drops one tier; its score is capped at the
+  new tier's ceiling so score and tier always agree; customers never decay. New activity
+  re-scores the lead with the model.
 
 ---
 
-## Fastest end-to-end demo script (~5 min)
+## C. Intelligence
 
-1. Sign up on user site → browse a course (watch video, download brochure, view pricing) → add to cart → go to checkout, don't pay.
-2. `POST /api/debug/trigger-jobs` on 8000.
-3. Marketing dashboard → Leads → open the new `checkout_abandon` lead.
-4. Show **Why this score?** tab (explainability).
-5. Send the email → open its tracking pixel URL in a new tab → refresh → show score bump (closed-loop tracking).
-6. Show **Attribution** tab → the full path from first page view to this email.
-7. Dashboard → Priority Queue card → PLV in action.
-8. A/B Tests page → create + send a quick test, open one variant's pixel, show results.
-9. Mention lead decay running quietly in the background (point at the marketing-backend console log).
+### C1. Lead score, tier, persona, "Why this score?"
+Calibrated probability of buying (0–100), tier (Target ≥ 80, Nurture ≥ 60, Campaign ≥ 40, Low),
+persona (Hot/Warm/Cold/Customer). **Why this score?** shows, for each signal the learner has,
+how many points the score would lose without it — computed by the model, not hand-written
+rules. Leads scored by an older version show a note and can be refreshed with **↻ Re-score now**.
+
+### C2. Next-best-action
+For each allowed action — do nothing, information email, 10 % / 20 % coupon email, advisor call,
+WhatsApp — the uplift model estimates P(buy). Expected profit = P(buy) × price × (1 − discount)
+− cost; the engine picks the largest gain over doing nothing (or nothing). Consent, phone
+number, a daily call capacity (`NBA_DAILY_CALLS`), "no 20 % coupon for existing customers" and
+the trigger's allowed actions are enforced. 15 % of decisions (`NBA_EXPLORE_RATE`) are random —
+marked "random — learning sample" — so the system keeps learning what works.
+**Test** — lead → **Recommended action**: the chosen action, the reason in plain words and a
+table of every option (P(buy), uplift, expected profit, or why it was blocked).
+
+### C3. How to convert (tips)
+The cheapest set of up to 3 realistic steps (watch the overview, brochure, pricing walk-through,
+webinar, enquiry …) predicted to lift the lead into the next tier, with the predicted score.
+Shown to sales (lead → **Recommended action**, and in **Today's actions**) and, as
+"Your next steps", to the learner. Labelled as guidance: the model shows these signals go with
+buying; it does not prove a step causes it (see ML_PIPELINE §4).
+
+### C4. Closed loop
+* **Model health** (dashboard): predicted vs actual conversion per tier for real learners whose
+  outcome is known (bought, or 14 days passed).
+* **Next-best-action** card (dashboard): decisions per action, the random slice, and the
+  estimated profit per lead of "follow the model", "do nothing" and "information email to all"
+  (inverse-propensity estimates with 95 % intervals and the number of matching decisions).
+* **`retrain-model.bat`**: retrains the lead model (champion vs challenger on held-out real
+  learners) and the next-best-action model (champion vs an interpretable and a flexible
+  challenger, compared by off-policy profit on held-out real decisions). A model is replaced
+  only if the new one is better; the backend reloads it automatically.
+* **Test** — run `seed-demo-data.bat` (D1), refresh the dashboard (both cards fill), then run
+  `retrain-model.bat` and read the champion/challenger comparison.
+
+### C5. Pipeline forecast
+Dashboard card: expected revenue and new customers from everyone who has not bought yet
+(Σ P(buy) × course price), with a 90 % range and a per-tier breakdown. It is only as reliable
+as the calibration shown in Model health.
+
+### C6. Course recommendations
+Profile, viewed courses and "learners who bought X also bought Y"; each comes with its reason;
+never what the learner owns or has in the cart.
+
+---
+
+## D. Marketing dashboard
+
+### D1. Dashboard
+KPIs (people, average score, emails sent · clicked, active carts, open callbacks, purchases ·
+revenue, Target / Nurture counts), **Model health**, **Next-best-action**, **Pipeline forecast**,
+score distribution, leads by tier, campaign influence (clicks and purchases within 14 days of a
+click, per trigger/campaign), quick links, **⬇️ Export CSV** (one row per person) and
+**⚡ Run automations now**.
+*Demo data*: `seed-demo-data.bat` adds 400 simulated learners (emails ending in
+`@demo.xeducation.test`, which is never mailed) with six weeks of history, scored and decided
+by the live models; a banner and a "simulated" tag mark them; `remove-demo-data.bat` removes
+them and everything linked to them.
+
+### D2. Leads
+One row per person (their latest touchpoint), filter by tier, search, sort by **Newest**,
+**Score** or **Value** (P(buy) × course price). Status shows Customer, open callback,
+unsubscribed or emailed.
+
+### D3. Lead detail
+Profile card and **↻ Re-score now**, plus tabs:
+* **Recommended action** — the next-best-action decision and options, and *How to move this
+  lead up* (tips).
+* **Email** — the drafted email; **Improve email** (rule-based coach that removes spam
+  triggers and unverifiable claims such as salary or placement promises, and adds the real
+  course facts; Gemini if configured) and **Send email** (tracked).
+* **WhatsApp** — opens WhatsApp (wa.me) with the message; only for opted-in learners with a
+  phone number; logged.
+* **Activity** — recent events, score history, emails, purchases.
+* **Chat & callbacks** — chat transcript and callback requests.
+* **Coupon** — **Generate & assign** a personal code (5–50 %, 1–720 h).
+* **Why this score?** and **Attribution** (first touch, last touch before purchase, full
+  timeline).
+
+### D4. Today's actions
+Calls and WhatsApp messages chosen by next-best-action, highest expected extra profit first,
+with the call script / message and the tips. Record the result (**Spoke to them**, **No
+answer**, **Not interested**, or **Open WhatsApp** → **Mark sent**); outcomes are logged for
+learning. One open task per person and channel.
+
+### D5. Callbacks
+Requests from the website chat with phone and preferred time; **Open lead**, **Mark called**.
+
+### D6. Campaigns
+Schedule an email to a tier or **All leads** at a date and time (sent by a 1-minute timer), or
+**Send now**. `{first_name}`, `{name}`, `{course}` are personalised; opted-out learners are
+skipped. Each campaign shows delivered, clicks and purchases within 14 days; a campaign can
+only ever be sent once.
+
+### D7. A/B tests
+Two subject/body variants to a tier; recipients are split randomly 50/50 and each person gets
+one email. Results show click and purchase rates, a two-proportion z-test (p-value, 95 % CI)
+and how many sends are needed to detect a 5-point difference — a winner is declared only when
+the difference is significant.
+
+### D8. Coupons
+All issued coupons (automatic and manual) with status, expiry and delete.
+
+### D9. Q&A
+Unanswered course questions; publishing an answer shows it on the course page and emails the
+learner.
+
+---
+
+## Troubleshooting
+| Symptom | Cause / fix |
+|---|---|
+| `[ML] … not found — using fallback scoring` | no trained model: run `train-model.bat` |
+| `[NBA] nba_model.pkl not found — using the built-in prior` | same: run `train-model.bat` |
+| **Run automations now** says the backend refused | `INTERNAL_API_KEY` differs between the two `.env` files |
+| No emails arrive | Gmail not configured → look for `[EMAIL MOCK]` lines in the user-backend window |
+| Model health / NBA card say "no outcomes yet" | outcomes need a purchase or 14 days → use `seed-demo-data.bat` |
+| A lead dropped a tier during the demo | lead decay after 10 min idle in demo mode; any activity re-scores it |

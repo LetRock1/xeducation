@@ -1,0 +1,3086 @@
+{
+  "data": {
+    "customers": 64000,
+    "arms": {
+      "none": 21306,
+      "mens": 21307,
+      "womens": 21387
+    },
+    "arm_rates": {
+      "none": {
+        "visit": 0.10616727682343002,
+        "conversion": 0.005726086548390125,
+        "spend": 0.6527893551112361
+      },
+      "mens": {
+        "visit": 0.18275684047496127,
+        "conversion": 0.01253109306800582,
+        "spend": 1.422616511005773
+      },
+      "womens": {
+        "visit": 0.151400383410483,
+        "conversion": 0.008837144059475383,
+        "spend": 1.0772015710478329
+      }
+    },
+    "balance_smd": {
+      "mens": {
+        "recency": 0.0068,
+        "log_history": -0.0012,
+        "mens_buyer": -0.0046,
+        "womens_buyer": 0.0076,
+        "newbie": -0.0009,
+        "urban": 0.002,
+        "rural": 0.0137,
+        "web": 0.011,
+        "multichannel": -0.0042
+      },
+      "womens": {
+        "recency": 0.0052,
+        "log_history": 0.0065,
+        "mens_buyer": -0.0086,
+        "womens_buyer": 0.0049,
+        "newbie": 0.0026,
+        "urban": -0.0018,
+        "rural": 0.004,
+        "web": -0.0051,
+        "multichannel": -0.0053
+      }
+    },
+    "max_abs_smd": 0.0137
+  },
+  "design": {
+    "folds": 5,
+    "repeats": 3,
+    "bootstrap": 1000,
+    "outcome_trained": "visit",
+    "propensity": 0.3333333333333333,
+    "gbm_params": {
+      "learning_rate": 0.05,
+      "max_iter": 300,
+      "max_leaf_nodes": 15,
+      "min_samples_leaf": 100,
+      "early_stopping": true,
+      "validation_fraction": 0.15,
+      "n_iter_no_change": 20
+    },
+    "budgets": [
+      0.1,
+      0.2,
+      0.3,
+      0.5,
+      1.0
+    ]
+  },
+  "q1_targeting": {
+    "Random": {
+      "mens": {
+        "qini": {
+          "mean": -0.0021639099720048034,
+          "sd": 0.01635760074464963
+        },
+        "uplift_top10": {
+          "mean": 0.07959616174934488,
+          "sd": 0.026407543590494575
+        },
+        "uplift_top20": {
+          "mean": 0.08060188612014203,
+          "sd": 0.015960596948638706
+        },
+        "uplift_top30": {
+          "mean": 0.07819979062873508,
+          "sd": 0.010992861991638724
+        }
+      },
+      "womens": {
+        "qini": {
+          "mean": 0.0013705215693553439,
+          "sd": 0.018249362746258935
+        },
+        "uplift_top10": {
+          "mean": 0.047750092420641904,
+          "sd": 0.02306792484098534
+        },
+        "uplift_top20": {
+          "mean": 0.04548510430571481,
+          "sd": 0.014771421379780688
+        },
+        "uplift_top30": {
+          "mean": 0.04785102338767412,
+          "sd": 0.008838419117986641
+        }
+      }
+    },
+    "RFM rule (recency + spend)": {
+      "mens": {
+        "qini": {
+          "mean": 0.019574555312556533,
+          "sd": 0.012225194537776726
+        },
+        "uplift_top10": {
+          "mean": 0.09499925379759826,
+          "sd": 0.02397226201323998
+        },
+        "uplift_top20": {
+          "mean": 0.09195584732678899,
+          "sd": 0.012813353100576954
+        },
+        "uplift_top30": {
+          "mean": 0.08935295450014827,
+          "sd": 0.008257899370653035
+        }
+      },
+      "womens": {
+        "qini": {
+          "mean": -0.003242217636315682,
+          "sd": 0.010642816879547328
+        },
+        "uplift_top10": {
+          "mean": 0.044164191142226215,
+          "sd": 0.01772641563761474
+        },
+        "uplift_top20": {
+          "mean": 0.050533298870187426,
+          "sd": 0.01078095343935104
+        },
+        "uplift_top30": {
+          "mean": 0.04557860692674221,
+          "sd": 0.007984664415549892
+        }
+      }
+    },
+    "Ours: score-anchored S-learner (LR)": {
+      "mens": {
+        "qini": {
+          "mean": 0.010352995424345425,
+          "sd": 0.015111674708377161
+        },
+        "uplift_top10": {
+          "mean": 0.13436075495354274,
+          "sd": 0.022941852758097892
+        },
+        "uplift_top20": {
+          "mean": 0.09382290100712118,
+          "sd": 0.01605690451622114
+        },
+        "uplift_top30": {
+          "mean": 0.0838050188740269,
+          "sd": 0.014355939785178762
+        }
+      },
+      "womens": {
+        "qini": {
+          "mean": 0.06514790127435373,
+          "sd": 0.011058470929900168
+        },
+        "uplift_top10": {
+          "mean": 0.06907235686274367,
+          "sd": 0.013435990217838213
+        },
+        "uplift_top20": {
+          "mean": 0.06986082274691538,
+          "sd": 0.00837205074494771
+        },
+        "uplift_top30": {
+          "mean": 0.07198445979656544,
+          "sd": 0.0069147894549041545
+        }
+      }
+    },
+    "Ours without score anchor (ablation)": {
+      "mens": {
+        "qini": {
+          "mean": 0.010130122917324116,
+          "sd": 0.014353189069484504
+        },
+        "uplift_top10": {
+          "mean": 0.13596361831921155,
+          "sd": 0.024752320916174703
+        },
+        "uplift_top20": {
+          "mean": 0.0872343956151783,
+          "sd": 0.01666414733090861
+        },
+        "uplift_top30": {
+          "mean": 0.08121996615447784,
+          "sd": 0.012777403416251241
+        }
+      },
+      "womens": {
+        "qini": {
+          "mean": 0.0651074967332676,
+          "sd": 0.011726248693324923
+        },
+        "uplift_top10": {
+          "mean": 0.06903608444136809,
+          "sd": 0.017072238781209295
+        },
+        "uplift_top20": {
+          "mean": 0.06994867690126644,
+          "sd": 0.011159022092402117
+        },
+        "uplift_top30": {
+          "mean": 0.06929247903329143,
+          "sd": 0.00817288241819808
+        }
+      }
+    },
+    "T-learner (LR)": {
+      "mens": {
+        "qini": {
+          "mean": 0.009166051480565417,
+          "sd": 0.013946479588562495
+        },
+        "uplift_top10": {
+          "mean": 0.13538459989330592,
+          "sd": 0.024919680500673974
+        },
+        "uplift_top20": {
+          "mean": 0.08838240102360859,
+          "sd": 0.015633568616438682
+        },
+        "uplift_top30": {
+          "mean": 0.0810229861175574,
+          "sd": 0.014240880611448249
+        }
+      },
+      "womens": {
+        "qini": {
+          "mean": 0.06503885093000174,
+          "sd": 0.01156124785755771
+        },
+        "uplift_top10": {
+          "mean": 0.07121678456451264,
+          "sd": 0.016975933031297148
+        },
+        "uplift_top20": {
+          "mean": 0.0678642595592284,
+          "sd": 0.01089293977921449
+        },
+        "uplift_top30": {
+          "mean": 0.07037562639816027,
+          "sd": 0.008682110466566646
+        }
+      }
+    },
+    "T-learner (GBM)": {
+      "mens": {
+        "qini": {
+          "mean": 0.0037317948377021144,
+          "sd": 0.011371861813893025
+        },
+        "uplift_top10": {
+          "mean": 0.09869354257623524,
+          "sd": 0.02269021091587413
+        },
+        "uplift_top20": {
+          "mean": 0.08500568225479152,
+          "sd": 0.01367165260933155
+        },
+        "uplift_top30": {
+          "mean": 0.08020314364209756,
+          "sd": 0.01007287001866229
+        }
+      },
+      "womens": {
+        "qini": {
+          "mean": 0.05627669336295087,
+          "sd": 0.014641963048945723
+        },
+        "uplift_top10": {
+          "mean": 0.07839176604299165,
+          "sd": 0.01872705052424181
+        },
+        "uplift_top20": {
+          "mean": 0.07744895634372564,
+          "sd": 0.011872923400477445
+        },
+        "uplift_top30": {
+          "mean": 0.073052354761828,
+          "sd": 0.0072158791421990075
+        }
+      }
+    },
+    "Response model (GBM)": {
+      "mens": {
+        "qini": {
+          "mean": 0.02284085999157173,
+          "sd": 0.012990512494328678
+        },
+        "uplift_top10": {
+          "mean": 0.10699932350722205,
+          "sd": 0.031090203455257353
+        },
+        "uplift_top20": {
+          "mean": 0.09519480179546687,
+          "sd": 0.017826145063041657
+        },
+        "uplift_top30": {
+          "mean": 0.09060282700358364,
+          "sd": 0.011796410087288114
+        }
+      },
+      "womens": {
+        "qini": {
+          "mean": 0.03627792264701521,
+          "sd": 0.01033084372665361
+        },
+        "uplift_top10": {
+          "mean": 0.07221514446860063,
+          "sd": 0.020023521682762616
+        },
+        "uplift_top20": {
+          "mean": 0.0693550700144214,
+          "sd": 0.01106258742008269
+        },
+        "uplift_top30": {
+          "mean": 0.06686618754730228,
+          "sd": 0.007814340480679124
+        }
+      }
+    },
+    "S-learner (GBM)": {
+      "mens": {
+        "qini": {
+          "mean": 0.00553343947031906,
+          "sd": 0.012764800223318487
+        },
+        "uplift_top10": {
+          "mean": 0.11741718413465416,
+          "sd": 0.02406495275291215
+        },
+        "uplift_top20": {
+          "mean": 0.08913359658789786,
+          "sd": 0.01885522804082928
+        },
+        "uplift_top30": {
+          "mean": 0.08125640778552577,
+          "sd": 0.012276635597040836
+        }
+      },
+      "womens": {
+        "qini": {
+          "mean": 0.06099180127709669,
+          "sd": 0.010526514739063898
+        },
+        "uplift_top10": {
+          "mean": 0.07182199352185405,
+          "sd": 0.018389617153717116
+        },
+        "uplift_top20": {
+          "mean": 0.07507009016339462,
+          "sd": 0.011241924241485762
+        },
+        "uplift_top30": {
+          "mean": 0.07233310919164579,
+          "sd": 0.009079475006934628
+        }
+      }
+    },
+    "X-learner (GBM)": {
+      "mens": {
+        "qini": {
+          "mean": 0.0055096543177008,
+          "sd": 0.017629084484560634
+        },
+        "uplift_top10": {
+          "mean": 0.10951714674079,
+          "sd": 0.026727150254666068
+        },
+        "uplift_top20": {
+          "mean": 0.08853032762717442,
+          "sd": 0.015928405094782227
+        },
+        "uplift_top30": {
+          "mean": 0.08233234243422277,
+          "sd": 0.011503574861468231
+        }
+      },
+      "womens": {
+        "qini": {
+          "mean": 0.06258502553952844,
+          "sd": 0.013058363868316245
+        },
+        "uplift_top10": {
+          "mean": 0.0715465320562129,
+          "sd": 0.02203026670761493
+        },
+        "uplift_top20": {
+          "mean": 0.07182865487263526,
+          "sd": 0.014403232769720055
+        },
+        "uplift_top30": {
+          "mean": 0.07668826368226801,
+          "sd": 0.009520973195160954
+        }
+      }
+    },
+    "Class transformation (LR)": {
+      "mens": {
+        "qini": {
+          "mean": 0.013958806943719756,
+          "sd": 0.013433793420189076
+        },
+        "uplift_top10": {
+          "mean": 0.13164082377230601,
+          "sd": 0.024175709471209863
+        },
+        "uplift_top20": {
+          "mean": 0.09556883270379078,
+          "sd": 0.01452519603636035
+        },
+        "uplift_top30": {
+          "mean": 0.08748087733634538,
+          "sd": 0.008925432322260767
+        }
+      },
+      "womens": {
+        "qini": {
+          "mean": 0.0640439626630823,
+          "sd": 0.01389238021130243
+        },
+        "uplift_top10": {
+          "mean": 0.08176964795365511,
+          "sd": 0.0164634477924261
+        },
+        "uplift_top20": {
+          "mean": 0.07603117094865255,
+          "sd": 0.01597393982531099
+        },
+        "uplift_top30": {
+          "mean": 0.07376856729674278,
+          "sd": 0.010543012839508837
+        }
+      }
+    }
+  },
+  "q2_policy_value": {
+    "0.1": {
+      "NBA \u00b7 Ours: score-anchored S-learner (LR)": {
+        "emailed_share": 0.1,
+        "mens_share_of_emails": 0.9991666666666665,
+        "visit": {
+          "incremental_per_1000": 13.734375,
+          "ci95": [
+            10.8578125,
+            16.56328125
+          ]
+        },
+        "conversion": {
+          "incremental_per_1000": 1.546875,
+          "ci95": [
+            0.749609375,
+            2.3128906249999996
+          ]
+        },
+        "spend": {
+          "incremental_per_1000": 192.821875,
+          "ci95": [
+            49.784609374999974,
+            323.4217812499999
+          ]
+        }
+      },
+      "NBA \u00b7 Ours without score anchor (ablation)": {
+        "emailed_share": 0.1,
+        "mens_share_of_emails": 0.9963020833333333,
+        "visit": {
+          "incremental_per_1000": 13.9375,
+          "ci95": [
+            11.04609375,
+            16.703125
+          ],
+          "ours_minus_this": {
+            "mean": -0.203125,
+            "ci95": [
+              -0.484765625,
+              0.07851562499999964
+            ],
+            "share_of_resamples_ours_not_better": 0.923
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.5625,
+          "ci95": [
+            0.765234375,
+            2.3132812499999993
+          ],
+          "ours_minus_this": {
+            "mean": -0.015625,
+            "ci95": [
+              -0.0625,
+              0.03125
+            ],
+            "share_of_resamples_ours_not_better": 0.797
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 194.23,
+          "ci95": [
+            51.492953125,
+            324.3170078124999
+          ],
+          "ours_minus_this": {
+            "mean": -1.408125,
+            "ci95": [
+              -4.279671875,
+              0.9371875000000001
+            ],
+            "share_of_resamples_ours_not_better": 0.856
+          }
+        }
+      },
+      "NBA \u00b7 T-learner (LR)": {
+        "emailed_share": 0.1,
+        "mens_share_of_emails": 0.9973958333333333,
+        "visit": {
+          "incremental_per_1000": 13.9375,
+          "ci95": [
+            11.125,
+            16.703125
+          ],
+          "ours_minus_this": {
+            "mean": -0.203125,
+            "ci95": [
+              -0.53125,
+              0.109375
+            ],
+            "share_of_resamples_ours_not_better": 0.915
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.578125,
+          "ci95": [
+            0.780859375,
+            2.3285156249999996
+          ],
+          "ours_minus_this": {
+            "mean": -0.03125,
+            "ci95": [
+              -0.09375,
+              0.03125
+            ],
+            "share_of_resamples_ours_not_better": 0.895
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 195.45140625,
+          "ci95": [
+            51.498703125,
+            325.5744999999999
+          ],
+          "ours_minus_this": {
+            "mean": -2.62953125,
+            "ci95": [
+              -6.43297265625,
+              0.46859375000000003
+            ],
+            "share_of_resamples_ours_not_better": 0.943
+          }
+        }
+      },
+      "NBA \u00b7 T-learner (GBM)": {
+        "emailed_share": 0.1,
+        "mens_share_of_emails": 0.7876041666666664,
+        "visit": {
+          "incremental_per_1000": 10.234375,
+          "ci95": [
+            8.093359375,
+            12.375390625
+          ],
+          "ours_minus_this": {
+            "mean": 3.5,
+            "ci95": [
+              1.515625,
+              5.703125
+            ],
+            "share_of_resamples_ours_not_better": 0.001
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.03125,
+          "ci95": [
+            0.515625,
+            1.59375
+          ],
+          "ours_minus_this": {
+            "mean": 0.515625,
+            "ci95": [
+              -0.03125,
+              1.078125
+            ],
+            "share_of_resamples_ours_not_better": 0.039
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 131.31906249999997,
+          "ci95": [
+            29.096359374999988,
+            236.84069140624996
+          ],
+          "ours_minus_this": {
+            "mean": 61.50281250000001,
+            "ci95": [
+              -45.120093749999995,
+              179.67512890625
+            ],
+            "share_of_resamples_ours_not_better": 0.143
+          }
+        }
+      },
+      "Response-score targeting (GBM)": {
+        "emailed_share": 0.09999999999999999,
+        "mens_share_of_emails": 0.8440625,
+        "visit": {
+          "incremental_per_1000": 11.125,
+          "ci95": [
+            8.515625,
+            13.68828125
+          ],
+          "ours_minus_this": {
+            "mean": 2.609375,
+            "ci95": [
+              0.515234375,
+              4.672265625
+            ],
+            "share_of_resamples_ours_not_better": 0.005
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.296875,
+          "ci95": [
+            0.608984375,
+            2.0003906249999996
+          ],
+          "ours_minus_this": {
+            "mean": 0.25,
+            "ci95": [
+              -0.328515625,
+              0.796875
+            ],
+            "share_of_resamples_ours_not_better": 0.216
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 136.78515625,
+          "ci95": [
+            29.44357421875,
+            241.73859765624996
+          ],
+          "ours_minus_this": {
+            "mean": 56.036718749999984,
+            "ci95": [
+              -43.272625,
+              159.33483203125002
+            ],
+            "share_of_resamples_ours_not_better": 0.141
+          }
+        }
+      },
+      "NBA \u00b7 S-learner (GBM)": {
+        "emailed_share": 0.09999999999999999,
+        "mens_share_of_emails": 0.8893750000000001,
+        "visit": {
+          "incremental_per_1000": 11.703125,
+          "ci95": [
+            9.171875,
+            14.187890625
+          ],
+          "ours_minus_this": {
+            "mean": 2.03125,
+            "ci95": [
+              0.671875,
+              3.4066406249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.003
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.40625,
+          "ci95": [
+            0.780859375,
+            2.03125
+          ],
+          "ours_minus_this": {
+            "mean": 0.140625,
+            "ci95": [
+              -0.20351562499999998,
+              0.484375
+            ],
+            "share_of_resamples_ours_not_better": 0.237
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 169.22765624999997,
+          "ci95": [
+            59.31027343749997,
+            281.7033046874999
+          ],
+          "ours_minus_this": {
+            "mean": 23.594218750000003,
+            "ci95": [
+              -38.181585937499996,
+              83.44896484375002
+            ],
+            "share_of_resamples_ours_not_better": 0.242
+          }
+        }
+      },
+      "NBA \u00b7 X-learner (GBM)": {
+        "emailed_share": 0.1,
+        "mens_share_of_emails": 0.7944791666666665,
+        "visit": {
+          "incremental_per_1000": 10.828125,
+          "ci95": [
+            8.359375,
+            13.109765625
+          ],
+          "ours_minus_this": {
+            "mean": 2.90625,
+            "ci95": [
+              1.187109375,
+              4.594140625
+            ],
+            "share_of_resamples_ours_not_better": 0.0
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.28125,
+          "ci95": [
+            0.6875,
+            1.875
+          ],
+          "ours_minus_this": {
+            "mean": 0.265625,
+            "ci95": [
+              -0.171875,
+              0.6875
+            ],
+            "share_of_resamples_ours_not_better": 0.126
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 180.25484375,
+          "ci95": [
+            79.736171875,
+            282.0223085937499
+          ],
+          "ours_minus_this": {
+            "mean": 12.567031250000003,
+            "ci95": [
+              -58.68926171875,
+              88.68142578125
+            ],
+            "share_of_resamples_ours_not_better": 0.366
+          }
+        }
+      },
+      "NBA \u00b7 Class transformation (LR)": {
+        "emailed_share": 0.1,
+        "mens_share_of_emails": 1.0,
+        "visit": {
+          "incremental_per_1000": 13.640625,
+          "ci95": [
+            10.8125,
+            16.422265625
+          ],
+          "ours_minus_this": {
+            "mean": 0.09375,
+            "ci95": [
+              -0.390625,
+              0.625
+            ],
+            "share_of_resamples_ours_not_better": 0.363
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.59375,
+          "ci95": [
+            0.796484375,
+            2.3597656249999996
+          ],
+          "ours_minus_this": {
+            "mean": -0.046875,
+            "ci95": [
+              -0.140625,
+              0.046875
+            ],
+            "share_of_resamples_ours_not_better": 0.86
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 196.33109374999998,
+          "ci95": [
+            59.68480078124999,
+            335.0253125
+          ],
+          "ours_minus_this": {
+            "mean": -3.50921875,
+            "ci95": [
+              -26.06774609375,
+              18.758332031249996
+            ],
+            "share_of_resamples_ours_not_better": 0.625
+          }
+        }
+      },
+      "RFM rule + e-mail matching past purchases": {
+        "emailed_share": 0.1,
+        "mens_share_of_emails": 0.65859375,
+        "visit": {
+          "incremental_per_1000": 10.65625,
+          "ci95": [
+            8.06171875,
+            13.219921874999999
+          ],
+          "ours_minus_this": {
+            "mean": 3.078125,
+            "ci95": [
+              0.18710937500000002,
+              6.017968749999998
+            ],
+            "share_of_resamples_ours_not_better": 0.018
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 0.9375,
+          "ci95": [
+            0.1875,
+            1.6875
+          ],
+          "ours_minus_this": {
+            "mean": 0.609375,
+            "ci95": [
+              -0.1875,
+              1.3910156249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.068
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 110.39578124999998,
+          "ci95": [
+            9.240269531249988,
+            218.3600742187499
+          ],
+          "ours_minus_this": {
+            "mean": 82.42609375,
+            "ci95": [
+              -63.66601953125,
+              220.45880859374998
+            ],
+            "share_of_resamples_ours_not_better": 0.138
+          }
+        }
+      },
+      "Best single e-mail (mens) to random customers": {
+        "emailed_share": 0.1,
+        "mens_share_of_emails": 1.0,
+        "visit": {
+          "incremental_per_1000": 7.796875,
+          "ci95": [
+            6.390625,
+            9.28125
+          ],
+          "ours_minus_this": {
+            "mean": 5.9375,
+            "ci95": [
+              2.921875,
+              8.65703125
+            ],
+            "share_of_resamples_ours_not_better": 0.0
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 0.578125,
+          "ci95": [
+            0.234375,
+            0.9375
+          ],
+          "ours_minus_this": {
+            "mean": 0.96875,
+            "ci95": [
+              0.15625,
+              1.765625
+            ],
+            "share_of_resamples_ours_not_better": 0.009
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 69.9840625,
+          "ci95": [
+            9.853136718749983,
+            132.15974609374996
+          ],
+          "ours_minus_this": {
+            "mean": 122.83781249999997,
+            "ci95": [
+              -20.540058593749997,
+              259.637625
+            ],
+            "share_of_resamples_ours_not_better": 0.037
+          }
+        }
+      },
+      "Random customers, random e-mail": {
+        "emailed_share": 0.1,
+        "mens_share_of_emails": 0.5034895833333333,
+        "visit": {
+          "incremental_per_1000": 5.453125,
+          "ci95": [
+            3.999609375,
+            6.812890625
+          ],
+          "ours_minus_this": {
+            "mean": 8.28125,
+            "ci95": [
+              5.265234375,
+              11.344140625
+            ],
+            "share_of_resamples_ours_not_better": 0.0
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 0.328125,
+          "ci95": [
+            0.0,
+            0.640625
+          ],
+          "ours_minus_this": {
+            "mean": 1.21875,
+            "ci95": [
+              0.421875,
+              2.015625
+            ],
+            "share_of_resamples_ours_not_better": 0.001
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 42.862343749999994,
+          "ci95": [
+            -3.18178515625001,
+            91.95816406250002
+          ],
+          "ours_minus_this": {
+            "mean": 149.95953124999997,
+            "ci95": [
+              16.721089843749986,
+              288.1065664062499
+            ],
+            "share_of_resamples_ours_not_better": 0.015
+          }
+        }
+      }
+    },
+    "0.2": {
+      "NBA \u00b7 Ours: score-anchored S-learner (LR)": {
+        "emailed_share": 0.2,
+        "mens_share_of_emails": 0.7398177083333333,
+        "visit": {
+          "incremental_per_1000": 19.671875,
+          "ci95": [
+            16.390234375,
+            22.890625
+          ]
+        },
+        "conversion": {
+          "incremental_per_1000": 1.953125,
+          "ci95": [
+            1.015625,
+            2.8128906249999996
+          ]
+        },
+        "spend": {
+          "incremental_per_1000": 233.53734375,
+          "ci95": [
+            79.05833203125,
+            388.25858203125006
+          ]
+        }
+      },
+      "NBA \u00b7 Ours without score anchor (ablation)": {
+        "emailed_share": 0.2,
+        "mens_share_of_emails": 0.726328125,
+        "visit": {
+          "incremental_per_1000": 18.484375,
+          "ci95": [
+            14.796875,
+            21.921875
+          ],
+          "ours_minus_this": {
+            "mean": 1.1875,
+            "ci95": [
+              0.09335937500000002,
+              2.421875
+            ],
+            "share_of_resamples_ours_not_better": 0.018
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.828125,
+          "ci95": [
+            0.874609375,
+            2.6722656249999996
+          ],
+          "ours_minus_this": {
+            "mean": 0.125,
+            "ci95": [
+              -0.171875,
+              0.421875
+            ],
+            "share_of_resamples_ours_not_better": 0.204
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 204.01687499999997,
+          "ci95": [
+            46.52271093749999,
+            357.03433984374993
+          ],
+          "ours_minus_this": {
+            "mean": 29.52046875,
+            "ci95": [
+              -14.081191406250008,
+              73.720265625
+            ],
+            "share_of_resamples_ours_not_better": 0.085
+          }
+        }
+      },
+      "NBA \u00b7 T-learner (LR)": {
+        "emailed_share": 0.2,
+        "mens_share_of_emails": 0.73234375,
+        "visit": {
+          "incremental_per_1000": 18.328125,
+          "ci95": [
+            14.82734375,
+            21.656640625
+          ],
+          "ours_minus_this": {
+            "mean": 1.34375,
+            "ci95": [
+              0.358984375,
+              2.4066406249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.005
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.78125,
+          "ci95": [
+            0.843359375,
+            2.6253906249999996
+          ],
+          "ours_minus_this": {
+            "mean": 0.171875,
+            "ci95": [
+              -0.09375,
+              0.453125
+            ],
+            "share_of_resamples_ours_not_better": 0.127
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 201.1553125,
+          "ci95": [
+            42.11110937499996,
+            355.7793828125
+          ],
+          "ours_minus_this": {
+            "mean": 32.382031250000004,
+            "ci95": [
+              -10.545890625,
+              80.11884375000002
+            ],
+            "share_of_resamples_ours_not_better": 0.063
+          }
+        }
+      },
+      "NBA \u00b7 T-learner (GBM)": {
+        "emailed_share": 0.2,
+        "mens_share_of_emails": 0.7426302083333333,
+        "visit": {
+          "incremental_per_1000": 17.09375,
+          "ci95": [
+            14.15546875,
+            19.923046874999997
+          ],
+          "ours_minus_this": {
+            "mean": 2.578125,
+            "ci95": [
+              -0.032031249999999956,
+              5.126562499999999
+            ],
+            "share_of_resamples_ours_not_better": 0.026
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.609375,
+          "ci95": [
+            0.827734375,
+            2.375
+          ],
+          "ours_minus_this": {
+            "mean": 0.34375,
+            "ci95": [
+              -0.359765625,
+              1.046875
+            ],
+            "share_of_resamples_ours_not_better": 0.211
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 229.23468749999995,
+          "ci95": [
+            94.45251171874997,
+            366.17864843750004
+          ],
+          "ours_minus_this": {
+            "mean": 4.3026562499999965,
+            "ci95": [
+              -108.42081249999998,
+              110.05843749999993
+            ],
+            "share_of_resamples_ours_not_better": 0.491
+          }
+        }
+      },
+      "Response-score targeting (GBM)": {
+        "emailed_share": 0.2,
+        "mens_share_of_emails": 0.7844010416666666,
+        "visit": {
+          "incremental_per_1000": 19.125,
+          "ci95": [
+            15.702343749999999,
+            22.781640625
+          ],
+          "ours_minus_this": {
+            "mean": 0.546875,
+            "ci95": [
+              -2.390625,
+              3.4546874999999986
+            ],
+            "share_of_resamples_ours_not_better": 0.342
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.78125,
+          "ci95": [
+            0.858984375,
+            2.71875
+          ],
+          "ours_minus_this": {
+            "mean": 0.171875,
+            "ci95": [
+              -0.640625,
+              0.8910156249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.359
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 207.065,
+          "ci95": [
+            49.17182031250003,
+            358.9557968749999
+          ],
+          "ours_minus_this": {
+            "mean": 26.472343749999983,
+            "ci95": [
+              -91.14505078125,
+              152.97025000000002
+            ],
+            "share_of_resamples_ours_not_better": 0.367
+          }
+        }
+      },
+      "NBA \u00b7 S-learner (GBM)": {
+        "emailed_share": 0.2,
+        "mens_share_of_emails": 0.8173958333333333,
+        "visit": {
+          "incremental_per_1000": 18.234375,
+          "ci95": [
+            15.015234375,
+            21.234375
+          ],
+          "ours_minus_this": {
+            "mean": 1.4375,
+            "ci95": [
+              -0.76640625,
+              3.65625
+            ],
+            "share_of_resamples_ours_not_better": 0.108
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.96875,
+          "ci95": [
+            1.155859375,
+            2.796875
+          ],
+          "ours_minus_this": {
+            "mean": -0.015625,
+            "ci95": [
+              -0.609765625,
+              0.53125
+            ],
+            "share_of_resamples_ours_not_better": 0.532
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 226.01375000000002,
+          "ci95": [
+            72.66337499999997,
+            377.01159765624993
+          ],
+          "ours_minus_this": {
+            "mean": 7.523593750000006,
+            "ci95": [
+              -84.15663671875002,
+              95.81063671874999
+            ],
+            "share_of_resamples_ours_not_better": 0.429
+          }
+        }
+      },
+      "NBA \u00b7 X-learner (GBM)": {
+        "emailed_share": 0.19999999999999998,
+        "mens_share_of_emails": 0.73453125,
+        "visit": {
+          "incremental_per_1000": 17.71875,
+          "ci95": [
+            14.546875,
+            20.937890625
+          ],
+          "ours_minus_this": {
+            "mean": 1.953125,
+            "ci95": [
+              -0.500390625,
+              4.375781249999999
+            ],
+            "share_of_resamples_ours_not_better": 0.047
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.890625,
+          "ci95": [
+            1.03125,
+            2.75
+          ],
+          "ours_minus_this": {
+            "mean": 0.0625,
+            "ci95": [
+              -0.5,
+              0.671875
+            ],
+            "share_of_resamples_ours_not_better": 0.44
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 252.05515624999998,
+          "ci95": [
+            101.86511718749999,
+            404.9471835937499
+          ],
+          "ours_minus_this": {
+            "mean": -18.517812499999984,
+            "ci95": [
+              -108.80938281250003,
+              66.66255859374995
+            ],
+            "share_of_resamples_ours_not_better": 0.644
+          }
+        }
+      },
+      "NBA \u00b7 Class transformation (LR)": {
+        "emailed_share": 0.2,
+        "mens_share_of_emails": 0.8600260416666666,
+        "visit": {
+          "incremental_per_1000": 20.171875,
+          "ci95": [
+            16.9671875,
+            23.423046874999997
+          ],
+          "ours_minus_this": {
+            "mean": -0.5,
+            "ci95": [
+              -2.547265625,
+              1.484375
+            ],
+            "share_of_resamples_ours_not_better": 0.681
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.8125,
+          "ci95": [
+            0.859375,
+            2.71875
+          ],
+          "ours_minus_this": {
+            "mean": 0.140625,
+            "ci95": [
+              -0.34375,
+              0.578125
+            ],
+            "share_of_resamples_ours_not_better": 0.308
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 202.87515625,
+          "ci95": [
+            32.2648125,
+            365.8515703124998
+          ],
+          "ours_minus_this": {
+            "mean": 30.6621875,
+            "ci95": [
+              -49.244664062500014,
+              103.88016015624997
+            ],
+            "share_of_resamples_ours_not_better": 0.234
+          }
+        }
+      },
+      "RFM rule + e-mail matching past purchases": {
+        "emailed_share": 0.2,
+        "mens_share_of_emails": 0.6330729166666667,
+        "visit": {
+          "incremental_per_1000": 19.34375,
+          "ci95": [
+            15.32578125,
+            22.9375
+          ],
+          "ours_minus_this": {
+            "mean": 0.328125,
+            "ci95": [
+              -3.484375,
+              4.140625
+            ],
+            "share_of_resamples_ours_not_better": 0.424
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.5625,
+          "ci95": [
+            0.53125,
+            2.5628906249999996
+          ],
+          "ours_minus_this": {
+            "mean": 0.390625,
+            "ci95": [
+              -0.515625,
+              1.375
+            ],
+            "share_of_resamples_ours_not_better": 0.219
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 164.11374999999998,
+          "ci95": [
+            23.478183593749975,
+            320.18124609375
+          ],
+          "ours_minus_this": {
+            "mean": 69.42359375,
+            "ci95": [
+              -87.97506640625011,
+              231.93196874999998
+            ],
+            "share_of_resamples_ours_not_better": 0.19
+          }
+        }
+      },
+      "Best single e-mail (mens) to random customers": {
+        "emailed_share": 0.2,
+        "mens_share_of_emails": 1.0,
+        "visit": {
+          "incremental_per_1000": 15.875,
+          "ci95": [
+            13.67109375,
+            18.06328125
+          ],
+          "ours_minus_this": {
+            "mean": 3.796875,
+            "ci95": [
+              0.390234375,
+              6.907421874999999
+            ],
+            "share_of_resamples_ours_not_better": 0.015
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.453125,
+          "ci95": [
+            0.890234375,
+            2.0
+          ],
+          "ours_minus_this": {
+            "mean": 0.5,
+            "ci95": [
+              -0.406640625,
+              1.34375
+            ],
+            "share_of_resamples_ours_not_better": 0.136
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 165.39390625,
+          "ci95": [
+            58.87106249999999,
+            266.94964453125
+          ],
+          "ours_minus_this": {
+            "mean": 68.14343749999999,
+            "ci95": [
+              -79.98348437500007,
+              209.43205859375004
+            ],
+            "share_of_resamples_ours_not_better": 0.175
+          }
+        }
+      },
+      "Random customers, random e-mail": {
+        "emailed_share": 0.2,
+        "mens_share_of_emails": 0.5015364583333333,
+        "visit": {
+          "incremental_per_1000": 12.359375,
+          "ci95": [
+            10.35859375,
+            14.37578125
+          ],
+          "ours_minus_this": {
+            "mean": 7.3125,
+            "ci95": [
+              3.84296875,
+              10.437890625
+            ],
+            "share_of_resamples_ours_not_better": 0.0
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 0.875,
+          "ci95": [
+            0.40625,
+            1.328125
+          ],
+          "ours_minus_this": {
+            "mean": 1.078125,
+            "ci95": [
+              0.17148437500000002,
+              1.8910156249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.01
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 127.62765625,
+          "ci95": [
+            56.06088281250001,
+            202.47226953124996
+          ],
+          "ours_minus_this": {
+            "mean": 105.90968749999998,
+            "ci95": [
+              -38.09097265625003,
+              243.98527734375
+            ],
+            "share_of_resamples_ours_not_better": 0.087
+          }
+        }
+      }
+    },
+    "0.3": {
+      "NBA \u00b7 Ours: score-anchored S-learner (LR)": {
+        "emailed_share": 0.3,
+        "mens_share_of_emails": 0.6697569444444444,
+        "visit": {
+          "incremental_per_1000": 25.921875,
+          "ci95": [
+            21.968359375,
+            29.875390625
+          ]
+        },
+        "conversion": {
+          "incremental_per_1000": 2.59375,
+          "ci95": [
+            1.515625,
+            3.6410156249999996
+          ]
+        },
+        "spend": {
+          "incremental_per_1000": 318.15640625000003,
+          "ci95": [
+            137.38086328125,
+            494.14167187499993
+          ]
+        }
+      },
+      "NBA \u00b7 Ours without score anchor (ablation)": {
+        "emailed_share": 0.3,
+        "mens_share_of_emails": 0.6430555555555555,
+        "visit": {
+          "incremental_per_1000": 25.078125,
+          "ci95": [
+            20.936328125,
+            28.986718749999998
+          ],
+          "ours_minus_this": {
+            "mean": 0.84375,
+            "ci95": [
+              -0.516015625,
+              2.1570312499999993
+            ],
+            "share_of_resamples_ours_not_better": 0.109
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 2.53125,
+          "ci95": [
+            1.421484375,
+            3.5472656249999996
+          ],
+          "ours_minus_this": {
+            "mean": 0.0625,
+            "ci95": [
+              -0.281640625,
+              0.39101562499999964
+            ],
+            "share_of_resamples_ours_not_better": 0.371
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 313.11859375,
+          "ci95": [
+            125.57897656249997,
+            502.20440234375
+          ],
+          "ours_minus_this": {
+            "mean": 5.0378124999999905,
+            "ci95": [
+              -55.53306640625,
+              58.98676953124999
+            ],
+            "share_of_resamples_ours_not_better": 0.439
+          }
+        }
+      },
+      "NBA \u00b7 T-learner (LR)": {
+        "emailed_share": 0.3,
+        "mens_share_of_emails": 0.6543055555555556,
+        "visit": {
+          "incremental_per_1000": 25.203125,
+          "ci95": [
+            21.31171875,
+            29.203515625
+          ],
+          "ours_minus_this": {
+            "mean": 0.71875,
+            "ci95": [
+              -0.4375,
+              1.9378906249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.13
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 2.59375,
+          "ci95": [
+            1.515234375,
+            3.5941406249999996
+          ],
+          "ours_minus_this": {
+            "mean": 0.0,
+            "ci95": [
+              -0.328125,
+              0.328125
+            ],
+            "share_of_resamples_ours_not_better": 0.517
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 326.6059375,
+          "ci95": [
+            141.01115625,
+            516.1837656249999
+          ],
+          "ours_minus_this": {
+            "mean": -8.449531249999998,
+            "ci95": [
+              -58.37796875,
+              36.342890624999995
+            ],
+            "share_of_resamples_ours_not_better": 0.639
+          }
+        }
+      },
+      "NBA \u00b7 T-learner (GBM)": {
+        "emailed_share": 0.3,
+        "mens_share_of_emails": 0.7158159722222223,
+        "visit": {
+          "incremental_per_1000": 23.6875,
+          "ci95": [
+            20.1078125,
+            27.048828125
+          ],
+          "ours_minus_this": {
+            "mean": 2.234375,
+            "ci95": [
+              -0.67265625,
+              5.469531249999999
+            ],
+            "share_of_resamples_ours_not_better": 0.075
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.984375,
+          "ci95": [
+            1.09375,
+            2.8441406249999996
+          ],
+          "ours_minus_this": {
+            "mean": 0.609375,
+            "ci95": [
+              -0.250390625,
+              1.390625
+            ],
+            "share_of_resamples_ours_not_better": 0.091
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 255.92999999999998,
+          "ci95": [
+            97.75198828124994,
+            398.0291874999998
+          ],
+          "ours_minus_this": {
+            "mean": 62.22640625000001,
+            "ci95": [
+              -82.53875000000005,
+              205.7300585937499
+            ],
+            "share_of_resamples_ours_not_better": 0.188
+          }
+        }
+      },
+      "Response-score targeting (GBM)": {
+        "emailed_share": 0.3,
+        "mens_share_of_emails": 0.7697395833333334,
+        "visit": {
+          "incremental_per_1000": 27.359375,
+          "ci95": [
+            23.483203125,
+            31.656640624999998
+          ],
+          "ours_minus_this": {
+            "mean": -1.4375,
+            "ci95": [
+              -5.016015625,
+              2.09375
+            ],
+            "share_of_resamples_ours_not_better": 0.768
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 2.21875,
+          "ci95": [
+            1.125,
+            3.375
+          ],
+          "ours_minus_this": {
+            "mean": 0.375,
+            "ci95": [
+              -0.484765625,
+              1.265625
+            ],
+            "share_of_resamples_ours_not_better": 0.224
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 247.71828125000002,
+          "ci95": [
+            65.705390625,
+            428.2187890624999
+          ],
+          "ours_minus_this": {
+            "mean": 70.438125,
+            "ci95": [
+              -80.11736328125001,
+              229.50586718750014
+            ],
+            "share_of_resamples_ours_not_better": 0.203
+          }
+        }
+      },
+      "NBA \u00b7 S-learner (GBM)": {
+        "emailed_share": 0.3,
+        "mens_share_of_emails": 0.7803472222222222,
+        "visit": {
+          "incremental_per_1000": 24.921875,
+          "ci95": [
+            21.248828125,
+            28.390625
+          ],
+          "ours_minus_this": {
+            "mean": 1.0,
+            "ci95": [
+              -1.953125,
+              3.7671874999999986
+            ],
+            "share_of_resamples_ours_not_better": 0.217
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 2.546875,
+          "ci95": [
+            1.577734375,
+            3.46875
+          ],
+          "ours_minus_this": {
+            "mean": 0.046875,
+            "ci95": [
+              -0.6875,
+              0.703125
+            ],
+            "share_of_resamples_ours_not_better": 0.456
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 315.79265625,
+          "ci95": [
+            150.62539062499997,
+            495.54307421875
+          ],
+          "ours_minus_this": {
+            "mean": 2.363749999999996,
+            "ci95": [
+              -126.76293750000002,
+              122.35137500000002
+            ],
+            "share_of_resamples_ours_not_better": 0.488
+          }
+        }
+      },
+      "NBA \u00b7 X-learner (GBM)": {
+        "emailed_share": 0.3,
+        "mens_share_of_emails": 0.7143402777777778,
+        "visit": {
+          "incremental_per_1000": 24.75,
+          "ci95": [
+            21.125,
+            28.43828125
+          ],
+          "ours_minus_this": {
+            "mean": 1.171875,
+            "ci95": [
+              -1.796875,
+              4.453125
+            ],
+            "share_of_resamples_ours_not_better": 0.19
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 2.578125,
+          "ci95": [
+            1.625,
+            3.5316406249999996
+          ],
+          "ours_minus_this": {
+            "mean": 0.015625,
+            "ci95": [
+              -0.719140625,
+              0.734375
+            ],
+            "share_of_resamples_ours_not_better": 0.482
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 341.0178125,
+          "ci95": [
+            167.21657031249995,
+            513.7565312499999
+          ],
+          "ours_minus_this": {
+            "mean": -22.861406249999995,
+            "ci95": [
+              -145.35681249999996,
+              95.82239843749994
+            ],
+            "share_of_resamples_ours_not_better": 0.646
+          }
+        }
+      },
+      "NBA \u00b7 Class transformation (LR)": {
+        "emailed_share": 0.3,
+        "mens_share_of_emails": 0.8103993055555556,
+        "visit": {
+          "incremental_per_1000": 27.9375,
+          "ci95": [
+            24.15546875,
+            31.954296874999997
+          ],
+          "ours_minus_this": {
+            "mean": -2.015625,
+            "ci95": [
+              -4.594140625,
+              0.890625
+            ],
+            "share_of_resamples_ours_not_better": 0.927
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 2.359375,
+          "ci95": [
+            1.233984375,
+            3.40625
+          ],
+          "ours_minus_this": {
+            "mean": 0.234375,
+            "ci95": [
+              -0.421875,
+              0.8753906249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.263
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 270.92281249999996,
+          "ci95": [
+            77.45387109375001,
+            450.99220703124996
+          ],
+          "ours_minus_this": {
+            "mean": 47.23359375,
+            "ci95": [
+              -52.097203125,
+              142.024625
+            ],
+            "share_of_resamples_ours_not_better": 0.166
+          }
+        }
+      },
+      "RFM rule + e-mail matching past purchases": {
+        "emailed_share": 0.3,
+        "mens_share_of_emails": 0.6097743055555557,
+        "visit": {
+          "incremental_per_1000": 25.953125,
+          "ci95": [
+            21.4828125,
+            30.221874999999997
+          ],
+          "ours_minus_this": {
+            "mean": -0.03125,
+            "ci95": [
+              -3.9859375,
+              3.877343749999998
+            ],
+            "share_of_resamples_ours_not_better": 0.506
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.75,
+          "ci95": [
+            0.593359375,
+            2.9539062499999993
+          ],
+          "ours_minus_this": {
+            "mean": 0.84375,
+            "ci95": [
+              -0.15703124999999996,
+              1.828125
+            ],
+            "share_of_resamples_ours_not_better": 0.057
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 247.74374999999998,
+          "ci95": [
+            69.48814453124999,
+            438.69835546875
+          ],
+          "ours_minus_this": {
+            "mean": 70.41265625000001,
+            "ci95": [
+              -79.71409765625003,
+              240.000375
+            ],
+            "share_of_resamples_ours_not_better": 0.205
+          }
+        }
+      },
+      "Best single e-mail (mens) to random customers": {
+        "emailed_share": 0.3,
+        "mens_share_of_emails": 1.0,
+        "visit": {
+          "incremental_per_1000": 22.15625,
+          "ci95": [
+            19.23359375,
+            25.00078125
+          ],
+          "ours_minus_this": {
+            "mean": 3.765625,
+            "ci95": [
+              -0.016015624999999978,
+              7.485546874999999
+            ],
+            "share_of_resamples_ours_not_better": 0.026
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 2.0,
+          "ci95": [
+            1.28125,
+            2.6878906249999996
+          ],
+          "ours_minus_this": {
+            "mean": 0.59375,
+            "ci95": [
+              -0.390625,
+              1.5625
+            ],
+            "share_of_resamples_ours_not_better": 0.132
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 269.8778125,
+          "ci95": [
+            160.79562890625,
+            384.21430468749986
+          ],
+          "ours_minus_this": {
+            "mean": 48.278593749999985,
+            "ci95": [
+              -126.55672656250009,
+              224.38797656249997
+            ],
+            "share_of_resamples_ours_not_better": 0.294
+          }
+        }
+      },
+      "Random customers, random e-mail": {
+        "emailed_share": 0.3,
+        "mens_share_of_emails": 0.4994618055555555,
+        "visit": {
+          "incremental_per_1000": 20.71875,
+          "ci95": [
+            18.07734375,
+            23.36015625
+          ],
+          "ours_minus_this": {
+            "mean": 5.203125,
+            "ci95": [
+              1.59296875,
+              8.829687499999999
+            ],
+            "share_of_resamples_ours_not_better": 0.002
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 1.765625,
+          "ci95": [
+            1.140234375,
+            2.375
+          ],
+          "ours_minus_this": {
+            "mean": 0.828125,
+            "ci95": [
+              -0.109375,
+              1.8125
+            ],
+            "share_of_resamples_ours_not_better": 0.05
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 223.2703125,
+          "ci95": [
+            120.64049218749999,
+            328.7657460937499
+          ],
+          "ours_minus_this": {
+            "mean": 94.88609375000001,
+            "ci95": [
+              -71.09893359375006,
+              262.4776640625
+            ],
+            "share_of_resamples_ours_not_better": 0.127
+          }
+        }
+      }
+    },
+    "0.5": {
+      "NBA \u00b7 Ours: score-anchored S-learner (LR)": {
+        "emailed_share": 0.5,
+        "mens_share_of_emails": 0.6347604166666666,
+        "visit": {
+          "incremental_per_1000": 39.625,
+          "ci95": [
+            34.967578125,
+            44.531640625
+          ]
+        },
+        "conversion": {
+          "incremental_per_1000": 3.578125,
+          "ci95": [
+            2.327734375,
+            4.781640625
+          ]
+        },
+        "spend": {
+          "incremental_per_1000": 447.07031250000006,
+          "ci95": [
+            237.53564453124997,
+            672.55086328125
+          ]
+        }
+      },
+      "NBA \u00b7 Ours without score anchor (ablation)": {
+        "emailed_share": 0.5,
+        "mens_share_of_emails": 0.6038854166666667,
+        "visit": {
+          "incremental_per_1000": 39.796875,
+          "ci95": [
+            34.96796875,
+            44.406640625
+          ],
+          "ours_minus_this": {
+            "mean": -0.171875,
+            "ci95": [
+              -1.8125,
+              1.469921874999999
+            ],
+            "share_of_resamples_ours_not_better": 0.552
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 3.609375,
+          "ci95": [
+            2.296484375,
+            4.812890625
+          ],
+          "ours_minus_this": {
+            "mean": -0.03125,
+            "ci95": [
+              -0.421875,
+              0.35976562499999964
+            ],
+            "share_of_resamples_ours_not_better": 0.569
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 450.83390625000004,
+          "ci95": [
+            234.97100781249995,
+            674.6349804687499
+          ],
+          "ours_minus_this": {
+            "mean": -3.763593750000007,
+            "ci95": [
+              -56.65168359375,
+              48.69171484375
+            ],
+            "share_of_resamples_ours_not_better": 0.567
+          }
+        }
+      },
+      "NBA \u00b7 T-learner (LR)": {
+        "emailed_share": 0.5,
+        "mens_share_of_emails": 0.61540625,
+        "visit": {
+          "incremental_per_1000": 38.796875,
+          "ci95": [
+            33.983984375,
+            43.673046875
+          ],
+          "ours_minus_this": {
+            "mean": 0.828125,
+            "ci95": [
+              -0.578515625,
+              2.3753906249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.134
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 3.53125,
+          "ci95": [
+            2.249609375,
+            4.719531249999999
+          ],
+          "ours_minus_this": {
+            "mean": 0.046875,
+            "ci95": [
+              -0.297265625,
+              0.37539062499999964
+            ],
+            "share_of_resamples_ours_not_better": 0.404
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 438.59296874999995,
+          "ci95": [
+            228.90119531249996,
+            669.7269414062499
+          ],
+          "ours_minus_this": {
+            "mean": 8.477343750000003,
+            "ci95": [
+              -42.53669531249999,
+              57.114292968749986
+            ],
+            "share_of_resamples_ours_not_better": 0.36
+          }
+        }
+      },
+      "NBA \u00b7 T-learner (GBM)": {
+        "emailed_share": 0.49999999999999994,
+        "mens_share_of_emails": 0.6924479166666667,
+        "visit": {
+          "incremental_per_1000": 38.9375,
+          "ci95": [
+            34.56015625,
+            43.234765625
+          ],
+          "ours_minus_this": {
+            "mean": 0.6875,
+            "ci95": [
+              -2.891015625,
+              4.252343749999998
+            ],
+            "share_of_resamples_ours_not_better": 0.34
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 3.21875,
+          "ci95": [
+            2.109375,
+            4.328515625
+          ],
+          "ours_minus_this": {
+            "mean": 0.359375,
+            "ci95": [
+              -0.546875,
+              1.265625
+            ],
+            "share_of_resamples_ours_not_better": 0.241
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 406.8651562499999,
+          "ci95": [
+            216.5075234375,
+            591.9215546875005
+          ],
+          "ours_minus_this": {
+            "mean": 40.205156250000016,
+            "ci95": [
+              -100.79873046875002,
+              191.04011718749996
+            ],
+            "share_of_resamples_ours_not_better": 0.302
+          }
+        }
+      },
+      "Response-score targeting (GBM)": {
+        "emailed_share": 0.5,
+        "mens_share_of_emails": 0.7475104166666666,
+        "visit": {
+          "incremental_per_1000": 41.546875,
+          "ci95": [
+            36.41796875,
+            47.23515625
+          ],
+          "ours_minus_this": {
+            "mean": -1.921875,
+            "ci95": [
+              -5.890625,
+              2.359375
+            ],
+            "share_of_resamples_ours_not_better": 0.835
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 3.296875,
+          "ci95": [
+            1.999609375,
+            4.71875
+          ],
+          "ours_minus_this": {
+            "mean": 0.28125,
+            "ci95": [
+              -0.75,
+              1.2660156249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.304
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 416.086875,
+          "ci95": [
+            196.0022539062499,
+            637.4269492187503
+          ],
+          "ours_minus_this": {
+            "mean": 30.983437499999994,
+            "ci95": [
+              -130.08091015624998,
+              192.89911328125007
+            ],
+            "share_of_resamples_ours_not_better": 0.363
+          }
+        }
+      },
+      "NBA \u00b7 S-learner (GBM)": {
+        "emailed_share": 0.5,
+        "mens_share_of_emails": 0.7558958333333332,
+        "visit": {
+          "incremental_per_1000": 39.75,
+          "ci95": [
+            35.09375,
+            44.297265625
+          ],
+          "ours_minus_this": {
+            "mean": -0.125,
+            "ci95": [
+              -3.23515625,
+              3.3128906249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.507
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 3.40625,
+          "ci95": [
+            2.233984375,
+            4.562890625
+          ],
+          "ours_minus_this": {
+            "mean": 0.171875,
+            "ci95": [
+              -0.625390625,
+              0.984375
+            ],
+            "share_of_resamples_ours_not_better": 0.351
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 413.9778125,
+          "ci95": [
+            216.053828125,
+            611.4402343750004
+          ],
+          "ours_minus_this": {
+            "mean": 33.0925,
+            "ci95": [
+              -98.47012500000001,
+              168.87303124999997
+            ],
+            "share_of_resamples_ours_not_better": 0.335
+          }
+        }
+      },
+      "NBA \u00b7 X-learner (GBM)": {
+        "emailed_share": 0.5,
+        "mens_share_of_emails": 0.7040416666666668,
+        "visit": {
+          "incremental_per_1000": 38.875,
+          "ci95": [
+            34.10859375,
+            43.234765625
+          ],
+          "ours_minus_this": {
+            "mean": 0.75,
+            "ci95": [
+              -2.672265625,
+              4.109765625
+            ],
+            "share_of_resamples_ours_not_better": 0.304
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 3.53125,
+          "ci95": [
+            2.3125,
+            4.71875
+          ],
+          "ours_minus_this": {
+            "mean": 0.046875,
+            "ci95": [
+              -0.859765625,
+              0.875
+            ],
+            "share_of_resamples_ours_not_better": 0.459
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 428.69515624999997,
+          "ci95": [
+            222.43162109374998,
+            625.1264453125002
+          ],
+          "ours_minus_this": {
+            "mean": 18.37515624999999,
+            "ci95": [
+              -112.35053124999995,
+              151.48587109374995
+            ],
+            "share_of_resamples_ours_not_better": 0.39
+          }
+        }
+      },
+      "NBA \u00b7 Class transformation (LR)": {
+        "emailed_share": 0.5,
+        "mens_share_of_emails": 0.7578854166666668,
+        "visit": {
+          "incremental_per_1000": 41.953125,
+          "ci95": [
+            37.296484375,
+            46.908203125
+          ],
+          "ours_minus_this": {
+            "mean": -2.328125,
+            "ci95": [
+              -5.313671875,
+              0.7816406249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.916
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 3.484375,
+          "ci95": [
+            2.155859375,
+            4.766015625
+          ],
+          "ours_minus_this": {
+            "mean": 0.09375,
+            "ci95": [
+              -0.703125,
+              0.8441406249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.428
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 409.5575,
+          "ci95": [
+            200.41180859375,
+            610.3462070312503
+          ],
+          "ours_minus_this": {
+            "mean": 37.5128125,
+            "ci95": [
+              -71.40086718750001,
+              150.46264843749992
+            ],
+            "share_of_resamples_ours_not_better": 0.263
+          }
+        }
+      },
+      "RFM rule + e-mail matching past purchases": {
+        "emailed_share": 0.5,
+        "mens_share_of_emails": 0.5868541666666668,
+        "visit": {
+          "incremental_per_1000": 41.546875,
+          "ci95": [
+            35.996875,
+            47.546875
+          ],
+          "ours_minus_this": {
+            "mean": -1.921875,
+            "ci95": [
+              -6.203125,
+              2.2503906249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.814
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 3.609375,
+          "ci95": [
+            2.25,
+            5.125390625
+          ],
+          "ours_minus_this": {
+            "mean": -0.03125,
+            "ci95": [
+              -1.109375,
+              1.078125
+            ],
+            "share_of_resamples_ours_not_better": 0.54
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 405.4621875,
+          "ci95": [
+            174.56531249999998,
+            631.8294257812498
+          ],
+          "ours_minus_this": {
+            "mean": 41.608125,
+            "ci95": [
+              -117.37458203125,
+              220.87158984374997
+            ],
+            "share_of_resamples_ours_not_better": 0.349
+          }
+        }
+      },
+      "Best single e-mail (mens) to random customers": {
+        "emailed_share": 0.5,
+        "mens_share_of_emails": 1.0,
+        "visit": {
+          "incremental_per_1000": 38.921875,
+          "ci95": [
+            34.9203125,
+            43.017578125
+          ],
+          "ours_minus_this": {
+            "mean": 0.703125,
+            "ci95": [
+              -3.266796875,
+              4.453515625
+            ],
+            "share_of_resamples_ours_not_better": 0.377
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 2.96875,
+          "ci95": [
+            1.9050781250000002,
+            3.9539062499999993
+          ],
+          "ours_minus_this": {
+            "mean": 0.609375,
+            "ci95": [
+              -0.484375,
+              1.7191406249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.15
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 326.51671875000005,
+          "ci95": [
+            162.07,
+            489.13182812499997
+          ],
+          "ours_minus_this": {
+            "mean": 120.55359374999998,
+            "ci95": [
+              -44.96717578124999,
+              289.14257421874987
+            ],
+            "share_of_resamples_ours_not_better": 0.081
+          }
+        }
+      },
+      "Random customers, random e-mail": {
+        "emailed_share": 0.5,
+        "mens_share_of_emails": 0.499375,
+        "visit": {
+          "incremental_per_1000": 30.1875,
+          "ci95": [
+            26.593359375,
+            33.908593749999994
+          ],
+          "ours_minus_this": {
+            "mean": 9.4375,
+            "ci95": [
+              4.967578125,
+              13.687890625
+            ],
+            "share_of_resamples_ours_not_better": 0.0
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 2.484375,
+          "ci95": [
+            1.562109375,
+            3.3753906249999996
+          ],
+          "ours_minus_this": {
+            "mean": 1.09375,
+            "ci95": [
+              0.046875,
+              2.109375
+            ],
+            "share_of_resamples_ours_not_better": 0.021
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 333.6775,
+          "ci95": [
+            195.7707500000001,
+            471.63069140624987
+          ],
+          "ours_minus_this": {
+            "mean": 113.39281249999999,
+            "ci95": [
+              -57.72529687499998,
+              303.34193359374984
+            ],
+            "share_of_resamples_ours_not_better": 0.093
+          }
+        }
+      }
+    },
+    "1.0": {
+      "NBA \u00b7 Ours: score-anchored S-learner (LR)": {
+        "emailed_share": 1.0,
+        "mens_share_of_emails": 0.7065677083333333,
+        "visit": {
+          "incremental_per_1000": 77.90625,
+          "ci95": [
+            70.841796875,
+            84.813671875
+          ]
+        },
+        "conversion": {
+          "incremental_per_1000": 6.9375,
+          "ci95": [
+            5.3125,
+            8.672265625
+          ]
+        },
+        "spend": {
+          "incremental_per_1000": 825.4003125000002,
+          "ci95": [
+            546.9823281250002,
+            1106.61512890625
+          ]
+        }
+      },
+      "NBA \u00b7 Ours without score anchor (ablation)": {
+        "emailed_share": 1.0,
+        "mens_share_of_emails": 0.6853020833333333,
+        "visit": {
+          "incremental_per_1000": 78.28125,
+          "ci95": [
+            71.34296875,
+            85.17265625
+          ],
+          "ours_minus_this": {
+            "mean": -0.375,
+            "ci95": [
+              -1.422265625,
+              0.7816406249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.767
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 6.859375,
+          "ci95": [
+            5.23359375,
+            8.59375
+          ],
+          "ours_minus_this": {
+            "mean": 0.078125,
+            "ci95": [
+              -0.15625,
+              0.359375
+            ],
+            "share_of_resamples_ours_not_better": 0.292
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 815.0014062500002,
+          "ci95": [
+            538.2357343750006,
+            1085.4454570312498
+          ],
+          "ours_minus_this": {
+            "mean": 10.398906250000003,
+            "ci95": [
+              -29.147933593750004,
+              55.81176953125001
+            ],
+            "share_of_resamples_ours_not_better": 0.317
+          }
+        }
+      },
+      "NBA \u00b7 T-learner (LR)": {
+        "emailed_share": 1.0,
+        "mens_share_of_emails": 0.6865677083333334,
+        "visit": {
+          "incremental_per_1000": 77.703125,
+          "ci95": [
+            70.780859375,
+            84.625390625
+          ],
+          "ours_minus_this": {
+            "mean": 0.203125,
+            "ci95": [
+              -0.9375,
+              1.34375
+            ],
+            "share_of_resamples_ours_not_better": 0.373
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 6.8125,
+          "ci95": [
+            5.171484375,
+            8.516015625
+          ],
+          "ours_minus_this": {
+            "mean": 0.125,
+            "ci95": [
+              -0.125,
+              0.40664062499999964
+            ],
+            "share_of_resamples_ours_not_better": 0.201
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 811.5871875,
+          "ci95": [
+            534.9398359375003,
+            1083.9306640625002
+          ],
+          "ours_minus_this": {
+            "mean": 13.813125,
+            "ci95": [
+              -25.607507812500007,
+              58.843218750000005
+            ],
+            "share_of_resamples_ours_not_better": 0.263
+          }
+        }
+      },
+      "NBA \u00b7 T-learner (GBM)": {
+        "emailed_share": 0.9910416666666667,
+        "mens_share_of_emails": 0.7313222619297876,
+        "visit": {
+          "incremental_per_1000": 74.46875,
+          "ci95": [
+            67.763671875,
+            81.48515625
+          ],
+          "ours_minus_this": {
+            "mean": 3.4375,
+            "ci95": [
+              0.65625,
+              6.21875
+            ],
+            "share_of_resamples_ours_not_better": 0.006
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 6.265625,
+          "ci95": [
+            4.67109375,
+            7.90625
+          ],
+          "ours_minus_this": {
+            "mean": 0.671875,
+            "ci95": [
+              -0.03164062499999998,
+              1.40625
+            ],
+            "share_of_resamples_ours_not_better": 0.039
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 740.63734375,
+          "ci95": [
+            478.9281992187501,
+            1003.512484375
+          ],
+          "ours_minus_this": {
+            "mean": 84.76296875,
+            "ci95": [
+              -20.30315624999999,
+              195.53510937500002
+            ],
+            "share_of_resamples_ours_not_better": 0.067
+          }
+        }
+      },
+      "Response-score targeting (GBM)": {
+        "emailed_share": 1.0,
+        "mens_share_of_emails": 0.7321197916666666,
+        "visit": {
+          "incremental_per_1000": 75.828125,
+          "ci95": [
+            69.0921875,
+            82.73984374999999
+          ],
+          "ours_minus_this": {
+            "mean": 2.078125,
+            "ci95": [
+              -0.5636718749999999,
+              4.860156249999999
+            ],
+            "share_of_resamples_ours_not_better": 0.067
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 6.25,
+          "ci95": [
+            4.655078125,
+            7.906640625
+          ],
+          "ours_minus_this": {
+            "mean": 0.6875,
+            "ci95": [
+              -0.0625,
+              1.40625
+            ],
+            "share_of_resamples_ours_not_better": 0.035
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 734.704375,
+          "ci95": [
+            475.99022265624984,
+            998.7250664062504
+          ],
+          "ours_minus_this": {
+            "mean": 90.69593750000001,
+            "ci95": [
+              -13.45008203124999,
+              195.33906249999995
+            ],
+            "share_of_resamples_ours_not_better": 0.047
+          }
+        }
+      },
+      "NBA \u00b7 S-learner (GBM)": {
+        "emailed_share": 0.9996458333333332,
+        "mens_share_of_emails": 0.7657503699226811,
+        "visit": {
+          "incremental_per_1000": 76.984375,
+          "ci95": [
+            70.1078125,
+            84.344921875
+          ],
+          "ours_minus_this": {
+            "mean": 0.921875,
+            "ci95": [
+              -1.297265625,
+              3.3914062499999993
+            ],
+            "share_of_resamples_ours_not_better": 0.21
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 6.765625,
+          "ci95": [
+            5.15546875,
+            8.484765625
+          ],
+          "ours_minus_this": {
+            "mean": 0.171875,
+            "ci95": [
+              -0.453125,
+              0.7347656249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.318
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 820.1453125,
+          "ci95": [
+            550.3619335937497,
+            1106.1059296874998
+          ],
+          "ours_minus_this": {
+            "mean": 5.255000000000013,
+            "ci95": [
+              -88.73750000000001,
+              98.94929687500003
+            ],
+            "share_of_resamples_ours_not_better": 0.446
+          }
+        }
+      },
+      "NBA \u00b7 X-learner (GBM)": {
+        "emailed_share": 0.9999635416666667,
+        "mens_share_of_emails": 0.7659185491137698,
+        "visit": {
+          "incremental_per_1000": 77.046875,
+          "ci95": [
+            69.968359375,
+            84.219140625
+          ],
+          "ours_minus_this": {
+            "mean": 0.859375,
+            "ci95": [
+              -1.797265625,
+              3.578125
+            ],
+            "share_of_resamples_ours_not_better": 0.241
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 6.796875,
+          "ci95": [
+            5.155859375,
+            8.46875
+          ],
+          "ours_minus_this": {
+            "mean": 0.140625,
+            "ci95": [
+              -0.484375,
+              0.765625
+            ],
+            "share_of_resamples_ours_not_better": 0.356
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 808.83609375,
+          "ci95": [
+            536.2851249999999,
+            1081.1741757812501
+          ],
+          "ours_minus_this": {
+            "mean": 16.564218750000002,
+            "ci95": [
+              -74.67433203124999,
+              101.34412890624995
+            ],
+            "share_of_resamples_ours_not_better": 0.324
+          }
+        }
+      },
+      "NBA \u00b7 Class transformation (LR)": {
+        "emailed_share": 1.0,
+        "mens_share_of_emails": 0.7713541666666667,
+        "visit": {
+          "incremental_per_1000": 77.984375,
+          "ci95": [
+            70.921484375,
+            85.09375
+          ],
+          "ours_minus_this": {
+            "mean": -0.078125,
+            "ci95": [
+              -2.203125,
+              2.1722656249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.541
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 7.140625,
+          "ci95": [
+            5.390234375,
+            8.75
+          ],
+          "ours_minus_this": {
+            "mean": -0.203125,
+            "ci95": [
+              -0.78125,
+              0.359375
+            ],
+            "share_of_resamples_ours_not_better": 0.79
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 842.03484375,
+          "ci95": [
+            566.3422656249999,
+            1117.5885859374996
+          ],
+          "ours_minus_this": {
+            "mean": -16.634531249999995,
+            "ci95": [
+              -98.1138515625,
+              64.25531640624995
+            ],
+            "share_of_resamples_ours_not_better": 0.65
+          }
+        }
+      },
+      "RFM rule + e-mail matching past purchases": {
+        "emailed_share": 1.0,
+        "mens_share_of_emails": 0.55103125,
+        "visit": {
+          "incremental_per_1000": 78.65625,
+          "ci95": [
+            71.52890625,
+            85.921875
+          ],
+          "ours_minus_this": {
+            "mean": -0.75,
+            "ci95": [
+              -3.656640625,
+              2.265625
+            ],
+            "share_of_resamples_ours_not_better": 0.705
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 6.5625,
+          "ci95": [
+            4.921875,
+            8.390625
+          ],
+          "ours_minus_this": {
+            "mean": 0.375,
+            "ci95": [
+              -0.312890625,
+              1.0628906249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.153
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 780.2020312500001,
+          "ci95": [
+            514.32437109375,
+            1064.8695820312498
+          ],
+          "ours_minus_this": {
+            "mean": 45.19828125,
+            "ci95": [
+              -30.852199218749984,
+              122.83148828125005
+            ],
+            "share_of_resamples_ours_not_better": 0.126
+          }
+        }
+      },
+      "Best single e-mail (mens) to random customers": {
+        "emailed_share": 1.0,
+        "mens_share_of_emails": 1.0,
+        "visit": {
+          "incremental_per_1000": 76.5,
+          "ci95": [
+            69.373828125,
+            83.76914062499999
+          ],
+          "ours_minus_this": {
+            "mean": 1.40625,
+            "ci95": [
+              -2.422265625,
+              5.203906249999999
+            ],
+            "share_of_resamples_ours_not_better": 0.247
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 6.796875,
+          "ci95": [
+            5.01328125,
+            8.578125
+          ],
+          "ours_minus_this": {
+            "mean": 0.140625,
+            "ci95": [
+              -0.797265625,
+              1.1097656249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.409
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 768.9075,
+          "ci95": [
+            493.5406992187501,
+            1051.2999609374997
+          ],
+          "ours_minus_this": {
+            "mean": 56.49281249999998,
+            "ci95": [
+              -87.58333984375,
+              204.96410546874995
+            ],
+            "share_of_resamples_ours_not_better": 0.214
+          }
+        }
+      },
+      "Random customers, random e-mail": {
+        "emailed_share": 1.0,
+        "mens_share_of_emails": 0.5004375,
+        "visit": {
+          "incremental_per_1000": 62.5,
+          "ci95": [
+            56.216796875,
+            68.65703125
+          ],
+          "ours_minus_this": {
+            "mean": 15.40625,
+            "ci95": [
+              11.33984375,
+              19.391015625
+            ],
+            "share_of_resamples_ours_not_better": 0.0
+          }
+        },
+        "conversion": {
+          "incremental_per_1000": 5.65625,
+          "ci95": [
+            4.0625,
+            7.21875
+          ],
+          "ours_minus_this": {
+            "mean": 1.28125,
+            "ci95": [
+              0.21835937500000002,
+              2.3285156249999996
+            ],
+            "share_of_resamples_ours_not_better": 0.01
+          }
+        },
+        "spend": {
+          "incremental_per_1000": 681.95984375,
+          "ci95": [
+            423.79177734374997,
+            930.6614882812494
+          ],
+          "ours_minus_this": {
+            "mean": 143.44046875000004,
+            "ci95": [
+              -7.420546875000024,
+              307.31535156249987
+            ],
+            "share_of_resamples_ours_not_better": 0.037
+          }
+        }
+      }
+    }
+  },
+  "ours_coefficients_logodds": {
+    "baseline": {
+      "intercept": -1.453,
+      "score_logit": 0.542,
+      "recency": -0.156,
+      "log_history": 0.094,
+      "mens_buyer": 0.31,
+      "womens_buyer": 0.19,
+      "newbie": -0.464,
+      "urban": -0.03,
+      "rural": 0.326,
+      "web": 0.214,
+      "multichannel": 0.114
+    },
+    "effect of mens e-mail": {
+      "intercept": -0.509,
+      "score_logit": -0.411,
+      "recency": -0.004,
+      "log_history": -0.002,
+      "mens_buyer": 0.352,
+      "womens_buyer": 0.434,
+      "newbie": 0.057,
+      "urban": 0.045,
+      "rural": -0.032,
+      "web": -0.026,
+      "multichannel": -0.065
+    },
+    "effect of womens e-mail": {
+      "intercept": -0.14,
+      "score_logit": -0.172,
+      "recency": 0.067,
+      "log_history": -0.046,
+      "mens_buyer": -0.08,
+      "womens_buyer": 0.494,
+      "newbie": 0.202,
+      "urban": 0.001,
+      "rural": -0.181,
+      "web": -0.036,
+      "multichannel": -0.021
+    }
+  },
+  "runtime_s": 134.7
+}

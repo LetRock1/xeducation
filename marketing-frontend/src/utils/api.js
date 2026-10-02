@@ -1,6 +1,18 @@
 import axios from 'axios'
-const tok = () => localStorage.getItem('mkt_token') || ''
-const a   = () => axios.create({ baseURL:'/api', headers: { Authorization: `Bearer ${tok()}` } })
+const client = axios.create({ baseURL: '/api' })
+client.interceptors.request.use(cfg => {
+  cfg.headers.Authorization = `Bearer ${localStorage.getItem('mkt_token') || ''}`
+  return cfg
+})
+// Session expired (tokens last 12 h) -> back to login instead of silently empty pages
+client.interceptors.response.use(r => r, err => {
+  if (err.response?.status === 401) {
+    localStorage.removeItem('mkt_token')
+    if (!window.location.pathname.startsWith('/login')) window.location.href = '/login'
+  }
+  return Promise.reject(err)
+})
+const a = () => client
 
 export const mktLogin        = d  => axios.post('/api/mkt/login', d)
 export const getStats        = () => a().get('/mkt/stats')
@@ -16,7 +28,7 @@ export const getLeads        = (tier, search, sort) => {
 export const getLead         = id => a().get(`/mkt/leads/${id}`)
 export const sendEmail       = d  => a().post('/mkt/send-email', d)
 export const aiImprove       = d  => a().post('/mkt/ai-improve', d)
-export const queueSms        = d  => a().post('/mkt/sms-queue', d)
+export const whatsappLink    = d  => a().post('/mkt/whatsapp', d)
 export const getSmsQueue     = () => a().get('/mkt/sms-queue')
 export const generateCoupon  = d  => a().post('/mkt/coupons/generate', d)
 export const getAllCoupons    = () => a().get('/mkt/coupons')
@@ -37,4 +49,11 @@ export const createAbTest   = d  => a().post('/mkt/ab-tests', d)
 export const getAbTests     = () => a().get('/mkt/ab-tests')
 export const sendAbTest     = id => a().post(`/mkt/ab-tests/${id}/send`)
 export const getAbTestResults = id => a().get(`/mkt/ab-tests/${id}/results`)
-export const seedAbTestDemo   = (id, perVariant = 8) => a().post(`/mkt/ab-tests/${id}/seed-demo?per_variant=${perVariant}`)
+export const sendCampaignNow  = id => a().post(`/mkt/campaigns/${id}/send-now`)
+export const getCallbacks     = (status = 'open') => a().get(`/mkt/callbacks?status=${status}`)
+export const closeCallback    = id => a().post(`/mkt/callbacks/${id}/done`)
+export const getActions       = (status = 'open') => a().get(`/mkt/actions?status=${status}`)
+export const completeAction   = (id, outcome) => a().post(`/mkt/actions/${id}/done`, { outcome })
+export const getNbaPerformance= () => a().get('/mkt/nba/performance')
+export const runAutomations   = () => a().post('/mkt/run-automations')
+export const getForecast      = () => a().get('/mkt/forecast')
