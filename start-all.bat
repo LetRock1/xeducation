@@ -74,6 +74,20 @@ if errorlevel 1 goto :fail
 call :setup_frontend marketing-frontend
 if errorlevel 1 goto :fail
 
+REM ---- Lead-scoring model: train it once with THIS venv's scikit-learn -----
+if exist "%ROOT%user-backend\ml_models\lead_model.pkl" goto :model_ok
+echo.
+echo ==== Training the lead-scoring model (first run only, ~30 s) ====
+pushd "%ROOT%"
+"%ROOT%user-backend\venv\Scripts\python.exe" ml\train_model.py
+if errorlevel 1 (
+  popd
+  echo [WARN] Model training failed - the backend will use fallback scoring.
+  goto :model_ok
+)
+popd
+:model_ok
+
 REM ---- Launch -------------------------------------------------------------
 echo.
 echo ==== Launching servers ====

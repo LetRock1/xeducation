@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate }           from 'react-router-dom'
 import { useAuth }                     from '../context/AuthContext'
-import { tracker }                     from '../utils/tracker'
+import { tracker, observeDwell }       from '../utils/tracker'
 import { COURSES }                     from '../data/courses'
 import RecommendedCourses              from '../components/RecommendedCourses'
 
@@ -71,19 +71,17 @@ export default function Home() {
   const [testiRef,  testiVis]  = useReveal()
   const webinarRef = useRef(null)
 
-  useEffect(() => {
-    const obs = new IntersectionObserver(([e]) => {
-      if (e.isIntersecting) { tracker.testimonial(null); obs.disconnect() }
-    }, { threshold: 0.3 })
-    if (testiRef.current) obs.observe(testiRef.current)
-  }, [testiRef])
+  const [seatReserved, setSeatReserved] = useState(false)
 
-  useEffect(() => {
-    const obs = new IntersectionObserver(([e]) => {
-      if (e.isIntersecting) { tracker.webinar(null); obs.disconnect() }
-    }, { threshold: 0.4 })
-    if (webinarRef.current) obs.observe(webinarRef.current)
-  }, [])
+  // Testimonials count after 4 s in view. The webinar counts only when the
+  // user reserves a seat (it used to fire just by scrolling past the section).
+  useEffect(() => observeDwell(testiRef.current, () => tracker.testimonial(null), { threshold: 0.3 }), [testiRef])
+
+  function reserveSeat() {
+    if (!user) { navigate('/signup'); return }
+    tracker.webinar(null)
+    setSeatReserved(true)
+  }
 
   return (
     <main className="bg-white">
@@ -269,10 +267,10 @@ export default function Home() {
             career pivots, and honest reviews. No sales pitch.
           </p>
           <button
-            onClick={() => navigate(user ? '/courses' : '/signup')}
+            onClick={reserveSeat} disabled={seatReserved}
             className="bg-gold hover:bg-yellow-400 text-navy font-bold px-8 py-4 rounded-xl
-                       transition-all active:scale-95 shadow-lg shadow-gold/30">
-            {user ? 'Browse Courses' : 'Reserve Your Free Seat'}
+                       transition-all active:scale-95 shadow-lg shadow-gold/30 disabled:opacity-80">
+            {seatReserved ? 'Seat reserved ✓ — see you Saturday' : 'Reserve Your Free Seat'}
           </button>
           <p className="text-slate-600 text-sm mt-4">
             Next session: Saturday, 11 AM IST · 47 seats remaining

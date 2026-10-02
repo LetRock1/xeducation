@@ -1,210 +1,189 @@
 """
-predict.py — ML Engine + Business Rules Layer
-Loads 6 .pkl artefacts once. predict_lead() is called for every user event.
-Business Rules Layer sits on top of ML score to handle new signals.
+predict.py — Lead scoring engine (v4)
+
+Loads ONE file: ml_models/lead_model.pkl (built by ml/train_model.py).
+The pipeline inside it already contains the preprocessing, and features are
+engineered with ml_features.py — the same code used at training time — so
+training and serving can no longer drift apart.
+
+What changed vs the old version:
+  * No KMeans/PCA persona: persona now comes from the calibrated score, so a
+    "Hot Lead" really is more likely to buy than a "Warm Lead".
+  * No hand-written floors/caps that override the model (cart = 62, enquiry
+    = 42, Student cap 72 × 0.85 ...). Cart, checkout, wishlist and enquiry
+    are now model features, learned from data. The only rule left: existing
+    customers are floored to Target Immediately (the model predicts first
+    purchase, not repeat purchase).
+  * lead_score == conversion_probability × 100 (except that customer rule),
+    so the number on the dashboard and the number in PLV always agree.
+  * The model file is reloaded automatically when retrained — no restart.
+  * If the model file is missing, a deterministic fallback is used (the old
+    mock returned a RANDOM score on every call).
 """
 import os
-import numpy as np
-import pandas as pd
+import threading
+
 import joblib
+import pandas as pd
 
-_BASE = os.path.join(os.path.dirname(__file__), "ml_models")
+import ml_features as F
 
-try:
-    _model          = joblib.load(os.path.join(_BASE, "hgb_model_calibrated.pkl"))
-    _preprocessor   = joblib.load(os.path.join(_BASE, "preprocessor.pkl"))
-    _kmeans         = joblib.load(os.path.join(_BASE, "kmeans.pkl"))
-    _pca            = joblib.load(os.path.join(_BASE, "pca.pkl"))
-    _scaler_cluster = joblib.load(os.path.join(_BASE, "scaler_cluster.pkl"))
-    _config         = joblib.load(os.path.join(_BASE, "model_config.pkl"))
-    CLUSTER_FEATURES = _config["cluster_features"]
-    PERSONA_MAP      = _config["persona_map"]
-    BEST_THRESHOLD   = _config["best_threshold"]
-    print("[ML] All 6 artefacts loaded.")
-except Exception as e:
-    print(f"[ML] WARNING: Could not load artefacts — {e}")
-    print("[ML] Running in mock mode. Copy .pkl files to ml_models/ to enable real predictions.")
-    _model = None
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "ml_models", "lead_model.pkl")
+CUSTOMER_FLOOR = 80.0
+
+_lock = threading.Lock()
+_state = {"bundle": None, "mtime": None, "warned": False}
 
 
-def _engineer(row: pd.DataFrame) -> pd.DataFrame:
-    """Exact mirror of ml_pipeline_final.py feature engineering."""
-    r = row.copy()
-    r["EngagementScore"] = (
-        r["TotalVisits"]*5 + r["TotalTimeOnWebsite"]/10 +
-        r["PageViewsPerVisit"]*15 + r["VideoWatched"]*20 +
-        r["BrochureDownloaded"]*25 + r["ChatInitiated"]*15
-    )
-    r["IntentScore"] = (
-        r["BrochureDownloaded"]*3 + r["PricingPageVisited"]*3 +
-        r["TestimonialVisited"]*2 + r["WebinarAttended"]*4 +
-        r["ChatInitiated"]*2 + r["WhatsAppOptIn"]*1
-    )
-    r["VisitIntensity"]    = r["TotalTimeOnWebsite"] / (r["TotalVisits"] + 1)
-    r["PagesPerMinute"]    = r["PageViewsPerVisit"]  / (r["TotalTimeOnWebsite"] + 1)
-    r["LeadInterestScore"] = r["EngagementScore"] * r["PagesPerMinute"]
-    r["Visits_x_Time"]     = r["TotalVisits"] * r["TotalTimeOnWebsite"]
-    r["IsReturningVisitor"]= (r["TotalVisits"] > 1).astype(int)
-    r["IsHighActivity"]    = (r["TotalTimeOnWebsite"] > 600).astype(int)
-    r["IsDeepResearcher"]  = ((r["TestimonialVisited"]==1)&(r["BrochureDownloaded"]==1)).astype(int)
-    r["EmailEngaged"]      = (r["DoNotEmail"] == "No").astype(int)
-    r["PhoneEngaged"]      = (r["DoNotCall"]  == "No").astype(int)
-    r["CommScore"]         = r["EmailEngaged"] + r["PhoneEngaged"]
-    HIGH_Q = ["Google","Organic Search","Direct Traffic","Reference","Webinar"]
-    r["HighQualityTraffic"]  = r["LeadSource"].isin(HIGH_Q).astype(int)
-    r["MotivationScore"]     = (
-        r["CommScore"]*1.0 + r["HighQualityTraffic"]*1.2 +
-        r["WebinarAttended"]*2.0 + r["WhatsAppOptIn"]*0.8 + r["BrochureDownloaded"]*1.5
-    )
-    r["Engagement_x_Source"] = r["EngagementScore"] * r["HighQualityTraffic"]
-    ir = (
-        r["TotalVisits"]*0.3 + r["TotalTimeOnWebsite"]/300 +
-        r["PageViewsPerVisit"]*0.4 + r["BrochureDownloaded"]*2.0 +
-        r["VideoWatched"]*1.5 + r["WebinarAttended"]*3.0
-    )
-    r["CourseInterestLevel"] = pd.cut(ir,bins=[-np.inf,2,5,np.inf],labels=["Low","Medium","High"]).astype(str)
-    r["ProfileCompleteness"] = (
-        (r["City"]!="Unknown").astype(int) + (r["Country"]!="Other").astype(int) +
-        r["AgeBracket"].notna().astype(int) + (r["HowDidYouHear"]!="Unknown").astype(int) + 1
-    )
-    r["VisitBucket"] = pd.cut(r["TotalVisits"],bins=[-1,1,4,100],labels=["Low","Medium","High"]).astype(str)
-    r["TimeBucket"]  = pd.cut(r["TotalTimeOnWebsite"],bins=[-1,300,800,10000],labels=["Low","Medium","High"]).astype(str)
+def _load():
+    """(Re)load the model bundle when the file changes on disk."""
+    try:
+        mtime = os.path.getmtime(MODEL_PATH)
+    except OSError:
+        if not _state["warned"]:
+            print(f"[ML] WARNING: {MODEL_PATH} not found — using fallback scoring.")
+            print("[ML]          Run train-model.bat (or ml/train_model.py) to create it.")
+            _state["warned"] = True
+        _state["bundle"] = None
+        return None
+    if _state["mtime"] == mtime and _state["bundle"] is not None:
+        return _state["bundle"]
+    with _lock:
+        if _state["mtime"] == mtime and _state["bundle"] is not None:
+            return _state["bundle"]
+        try:
+            bundle = joblib.load(MODEL_PATH)
+            if bundle.get("feature_version") != F.FEATURE_VERSION:
+                raise ValueError(f"model feature_version {bundle.get('feature_version')} "
+                                 f"!= code feature_version {F.FEATURE_VERSION}; retrain the model")
+            import sklearn
+            if bundle.get("sklearn_version") != sklearn.__version__:
+                print(f"[ML] WARNING: model trained with scikit-learn {bundle.get('sklearn_version')}, "
+                      f"running {sklearn.__version__}. Re-run train-model.bat if scores look wrong.")
+            _state.update(bundle=bundle, mtime=mtime, warned=False)
+            print(f"[ML] Loaded lead model {bundle['version']} ({bundle['model_type']}, "
+                  f"AUC {bundle['metrics'].get('roc_auc')}, sklearn {bundle['sklearn_version']})")
+        except Exception as e:
+            print(f"[ML] ERROR loading {MODEL_PATH}: {e} — using fallback scoring.")
+            _state.update(bundle=None, mtime=mtime)
+    return _state["bundle"]
+
+
+def model_info() -> dict:
+    b = _load()
+    if not b:
+        return {"loaded": False, "version": "fallback"}
+    return {"loaded": True, **{k: v for k, v in b.items() if k != "pipeline"}}
+
+
+def _legacy_keys(raw: dict) -> dict:
+    """Accept the old lowercase context keys as well as the new feature names."""
+    r = dict(raw)
+    if r.get("cart_abandoned"):
+        r.setdefault("AddedToCart", 1)
+    if (r.get("wishlist_count") or 0) > 0:
+        r.setdefault("AddedToWishlist", 1)
+    if r.get("enquiry_submitted"):
+        r.setdefault("EnquirySubmitted", 1)
     return r
 
 
-def _business_rules(score: float, raw: dict) -> tuple[float, str]:
-    adjusted = score
-
-    # Enquiry submitted → always at least Marketing Campaign
-    if raw.get("enquiry_submitted"):
-        adjusted = max(adjusted, 42.0)
-
-    # Cart abandoned → escalate to at least Nurture
-    if raw.get("cart_abandoned"):
-        adjusted = max(adjusted, 62.0)
-
-    # Wishlist item exists → small boost
-    if raw.get("wishlist_count", 0) > 0:
-        adjusted = min(adjusted + 5.0, 100.0)
-
-    # Has already purchased at least one course → the strongest possible
-    # signal (higher confidence than cart/checkout abandonment or an
-    # enquiry, which are just intent). Floors to Target Immediately so a
-    # paying customer never gets demoted to Low Priority purely because
-    # their on-site browsing signals were thin.
-    if raw.get("past_purchases", 0) > 0:
-        adjusted = max(adjusted, 85.0)
-
-    # 👇 NEW: Occupation-based dampening for low-conversion profiles
-    occupation = raw.get("CurrentOccupation", "")
-    low_conv_occupations = ["Student", "Unemployed", "Housewife"]
-    if occupation in low_conv_occupations:
-        # Allow full score only if cart abandoned, enquiry submitted, or already a paying customer
-        if not raw.get("cart_abandoned") and not raw.get("enquiry_submitted") and not raw.get("past_purchases", 0) > 0:
-            # Cap the score to a max of 72 for these occupations
-            adjusted = min(adjusted, 72.0)
-            # Optionally reduce the score slightly to keep it believable
-            adjusted = adjusted * 0.85   # 15% reduction for low-conv occupations
-
-    # Clip to valid range
-    adjusted = max(0.0, min(100.0, adjusted))
-
-    if   adjusted >= 80: action = "Target Immediately"
-    elif adjusted >= 60: action = "Nurture via Email/WhatsApp"
-    elif adjusted >= 40: action = "Marketing Campaign"
-    else:                action = "Low Priority"
-
-    return round(adjusted, 2), action
+def _fallback_probs(frame: pd.DataFrame):
+    """Deterministic stand-in used only when no trained model is available."""
+    import numpy as np
+    z = (-2.4 + 0.5 * np.log(frame["TotalVisits"]) + 0.2 * np.log1p(frame["TotalTimeOnWebsite"] / 60)
+         + 0.5 * frame["VideoWatched"] + 0.5 * frame["PricingPageVisited"] + 0.6 * frame["BrochureDownloaded"]
+         + 0.5 * frame["ChatInitiated"] + 0.8 * frame["WebinarAttended"] + 0.4 * frame["AddedToWishlist"]
+         + 1.0 * frame["AddedToCart"] + 1.2 * frame["CheckoutStarted"] + 1.1 * frame["EnquirySubmitted"]
+         + 0.15 * frame["EmailOpenedCount"].clip(upper=4)
+         + (frame["CurrentOccupation"] == "Working Professional") * 0.6
+         - frame["DoNotEmail"] * 0.5)
+    return 1 / (1 + np.exp(-z))
 
 
-# A user who skipped "Complete Profile" has a profile row full of NULLs, so
-# profile.get("city", "Unknown") returns None (the key exists). None values
-# break the sklearn preprocessor, so fill every feature with a safe default.
-_RAW_DEFAULTS = {
-    "LeadOrigin": "Landing Page Submission", "LeadSource": "Direct Traffic",
-    "DeviceType": "Desktop", "TotalVisits": 1, "TotalTimeOnWebsite": 0,
-    "PageViewsPerVisit": 1.0, "SessionsCount": 1, "VideoWatched": 0,
-    "BrochureDownloaded": 0, "ChatInitiated": 0, "PricingPageVisited": 0,
-    "TestimonialVisited": 0, "WebinarAttended": 0, "EmailOpenedCount": 0,
-    "CurrentOccupation": "Unemployed", "Specialization": "Business Administration",
-    "CourseType": "Browsing", "City": "Unknown", "Country": "India",
-    "HowDidYouHear": "Unknown", "DoNotEmail": "No", "DoNotCall": "No",
-    "WhatsAppOptIn": 0,
-}
+def _probs(rows: list) -> list:
+    frame = F.to_model_frame(rows)
+    b = _load()
+    if b is None:
+        return list(_fallback_probs(frame))
+    return list(b["pipeline"].predict_proba(frame)[:, 1])
 
 
-def _fill_defaults(raw: dict) -> dict:
-    out = dict(raw)
-    for k, v in _RAW_DEFAULTS.items():
-        if out.get(k) in (None, ""):
-            out[k] = v
-    if out.get("AgeBracket") == "":
-        out["AgeBracket"] = None
+def _explain(clean: dict, prob: float) -> list:
+    """What moved this lead's score: re-score with each present signal removed."""
+    variants, meta = [], []
+    for feat, label, absent in F.EXPLAIN_SIGNALS:
+        value = clean.get(feat)
+        if value == absent or (isinstance(absent, (int, float)) and not isinstance(value, str)
+                               and value <= absent):
+            continue
+        v = dict(clean)
+        v[feat] = absent
+        if feat == "TotalVisits":
+            v["TotalTimeOnWebsite"] = clean["TotalTimeOnWebsite"] / max(clean["TotalVisits"], 1)
+        variants.append(v)
+        meta.append((feat, label))
+    if not variants:
+        return []
+    alt = _probs(variants)
+    factors = []
+    for (feat, label), p_without in zip(meta, alt):
+        delta = (prob - p_without) * 100
+        if abs(delta) < 0.5:
+            continue
+        value = clean[feat]
+        if feat == "TotalTimeOnWebsite":
+            detail = f"{int(value // 60)} min {int(value % 60)} s on site in total"
+        elif feat == "TotalVisits":
+            detail = f"{int(value)} visits"
+        elif feat == "EmailOpenedCount":
+            detail = f"{int(value)} email open(s)/click(s)"
+        elif feat in ("CurrentOccupation", "LeadSource"):
+            detail = str(value)
+        else:
+            detail = "Yes"
+        factors.append({"factor": label, "detail": detail,
+                        "impact": f"{delta:+.0f} pts", "points": round(delta, 1)})
+    factors.sort(key=lambda f: -abs(f["points"]))
+    return factors[:6]
+
+
+def predict_lead(raw: dict, explain: bool = False) -> dict:
+    """
+    raw: the lead's features (see ml_features.RAW_FEATURES) plus optional
+         context: past_purchases (int). Missing/unknown values are handled.
+    """
+    r = _legacy_keys(raw)
+    clean = F.normalize_raw(r)
+    prob = float(_probs([clean])[0])
+    score = round(prob * 100, 2)
+
+    is_customer = (r.get("past_purchases") or 0) > 0
+    if is_customer:
+        score = max(score, CUSTOMER_FLOOR)
+
+    persona = F.persona_for(score, is_customer)
+    out = {
+        "lead_score": score,
+        "conversion_probability": round(prob, 4),
+        "persona": persona,
+        "customer_segment": persona,          # kept for old columns/UI
+        "recommended_action": F.tier_for(score),
+        "model_version": model_info().get("version", "fallback"),
+    }
+    if explain:
+        factors = _explain(clean, prob)
+        if is_customer:
+            factors.insert(0, {"factor": "Paying customer",
+                               "detail": f"{r.get('past_purchases')} past purchase(s)",
+                               "impact": f"floor {CUSTOMER_FLOOR:.0f}", "points": 0})
+        if not factors:
+            factors = [{"factor": "Baseline", "detail": "No strong signals yet",
+                        "impact": "baseline", "points": 0}]
+        out["factors"] = factors
+    out["features"] = clean
     return out
 
 
-def predict_lead(raw: dict) -> dict:
-    """
-    raw must contain all 24 CSV features + optional new signals:
-      cart_abandoned, wishlist_count, enquiry_submitted, past_purchases
-    """
-    raw = _fill_defaults(raw)
-
-    # ── Mock mode if no .pkl files ────────────────────────────────────
-    if _model is None:
-        import random
-        score = random.uniform(20, 95)
-        score, action = _business_rules(score, raw)
-        return {
-            "lead_score": score,
-            "conversion_probability": round(score/100, 4),
-            "persona": "Warm Lead" if score >= 60 else "Cold Lead",
-            "customer_segment": "1",
-            "recommended_action": action,
-        }
-
-    # ── Real prediction ───────────────────────────────────────────────
-    row = pd.DataFrame([raw])
-    row = _engineer(row)
-
-    cluster_scaled = _scaler_cluster.transform(row[CLUSTER_FEATURES])
-    cluster_pca    = _pca.transform(cluster_scaled)
-    segment        = str(_kmeans.predict(cluster_pca)[0])
-    persona        = PERSONA_MAP.get(segment, "Cold Lead")
-    row["CustomerSegment"] = segment
-    row["Persona"]         = persona
-
-    row_proc = _preprocessor.transform(row)
-    prob     = float(_model.predict_proba(row_proc)[0, 1])
-    score    = round(prob * 100, 2)
-
-    score, action = _business_rules(score, raw)
-
-    return {
-        "lead_score":             score,
-        "conversion_probability": round(prob, 4),
-        "persona":                persona,
-        "customer_segment":       segment,
-        "recommended_action":     action,
-    }
-
-
-def create_or_update_lead_snapshot(user_id: int, raw: dict):
-    pred = predict_lead(raw)
-    import database as db
-    db.execute("""
-        INSERT INTO leads (
-            user_id, course_type, lead_score, conversion_probability,
-            persona, customer_segment, recommended_action, trigger_reason
-        ) VALUES (?,?,?,?,?,?,?,?)
-    """, (
-        user_id,
-        raw.get("CourseType","Browsing"),
-        pred["lead_score"],
-        pred["conversion_probability"],
-        pred["persona"],
-        pred["customer_segment"],
-        pred["recommended_action"],
-        "behaviour_snapshot"
-    ))
-    return pred
+# Warm up at import so the first request isn't slow and load errors show at startup
+_load()

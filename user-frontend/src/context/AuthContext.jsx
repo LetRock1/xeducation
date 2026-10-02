@@ -34,6 +34,7 @@ export function AuthProvider({ children }) {
   function logout() {
     localStorage.removeItem('xe_token')
     localStorage.removeItem('xe_sid')
+    localStorage.removeItem('xe_last_active')
     setToken(null); setUser(null); setProfile(null); setSessionId(null)
     delete axios.defaults.headers.common['Authorization']
   }

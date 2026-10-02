@@ -27,6 +27,25 @@ pwd_ctx      = CryptContext(schemes=["bcrypt"], deprecated="auto")
 PUBLIC_BASE_URL   = os.getenv("PUBLIC_BASE_URL", "http://localhost:8001")
 USER_FRONTEND_URL = os.getenv("USER_FRONTEND_URL", "http://localhost:5173")
 DEMO_MODE         = os.getenv("DEMO_MODE", "true").lower() == "true"
+USER_BACKEND_URL  = os.getenv("USER_BACKEND_URL", "http://localhost:8000")
+INTERNAL_API_KEY  = os.getenv("INTERNAL_API_KEY", "xedu-internal-dev")
+MODEL_CARD_PATH   = os.getenv("MODEL_CARD_PATH", os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "user-backend", "ml_models", "model_card.json"))
+
+
+def request_rescore(user_id: int, reason: str) -> dict | None:
+    """Ask the user-backend to re-run the ML model for this user (closed loop)."""
+    import json as _json
+    import urllib.request
+    req = urllib.request.Request(
+        f"{USER_BACKEND_URL}/api/internal/rescore/{user_id}?reason={reason}",
+        method="POST", headers={"X-Internal-Key": INTERNAL_API_KEY})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return _json.loads(r.read().decode())
+    except Exception as e:
+        print(f"[RESCORE] user {user_id} ({reason}) failed: {e}")
+        return None
 
 # Engagement tracking is click-only (see track_click below) — no pixel.
 AB_TEST_MIN_SAMPLE = int(os.getenv("AB_TEST_MIN_SAMPLE", "1" if DEMO_MODE else "5"))
@@ -168,10 +187,12 @@ def mkt_auth(authorization: str = Header(None)):
 # ── STATS ─────────────────────────────────────────────────────────────────────
 @app.get("/api/mkt/stats")
 def stats(_=Depends(mkt_auth)):
-    total    = uq1("SELECT COUNT(*) as c FROM leads")["c"]
+    # one row per person: the latest lead of each user (a user gets a new lead row
+    # for every enquiry/abandonment, which used to inflate every count)
+    total    = uq1("SELECT COUNT(*) as c FROM (SELECT * FROM leads WHERE id IN (SELECT MAX(id) FROM leads GROUP BY user_id))")["c"]
     by_tier  = {r["recommended_action"]: r["cnt"] for r in
-                uq("SELECT recommended_action, COUNT(*) as cnt FROM leads GROUP BY recommended_action")}
-    avg_score= uq1("SELECT ROUND(AVG(lead_score),1) as a FROM leads")["a"] or 0
+                uq("SELECT recommended_action, COUNT(*) as cnt FROM (SELECT * FROM leads WHERE id IN (SELECT MAX(id) FROM leads GROUP BY user_id)) GROUP BY recommended_action")}
+    avg_score= uq1("SELECT ROUND(AVG(lead_score),1) as a FROM (SELECT * FROM leads WHERE id IN (SELECT MAX(id) FROM leads GROUP BY user_id))")["a"] or 0
     total_users = uq1("SELECT COUNT(*) as c FROM users WHERE is_verified=1")["c"]
     purchases   = uq1("SELECT COUNT(*) as c FROM purchases")["c"]
     cart_active = uq1("SELECT COUNT(DISTINCT user_id) as c FROM cart")["c"]
@@ -179,11 +200,11 @@ def stats(_=Depends(mkt_auth)):
 
     # Score distribution buckets
     dist = {
-        "0-20":  uq1("SELECT COUNT(*) as c FROM leads WHERE lead_score<20")["c"],
-        "20-40": uq1("SELECT COUNT(*) as c FROM leads WHERE lead_score>=20 AND lead_score<40")["c"],
-        "40-60": uq1("SELECT COUNT(*) as c FROM leads WHERE lead_score>=40 AND lead_score<60")["c"],
-        "60-80": uq1("SELECT COUNT(*) as c FROM leads WHERE lead_score>=60 AND lead_score<80")["c"],
-        "80-100":uq1("SELECT COUNT(*) as c FROM leads WHERE lead_score>=80")["c"],
+        "0-20":  uq1("SELECT COUNT(*) as c FROM (SELECT * FROM leads WHERE id IN (SELECT MAX(id) FROM leads GROUP BY user_id)) WHERE lead_score<20")["c"],
+        "20-40": uq1("SELECT COUNT(*) as c FROM (SELECT * FROM leads WHERE id IN (SELECT MAX(id) FROM leads GROUP BY user_id)) WHERE lead_score>=20 AND lead_score<40")["c"],
+        "40-60": uq1("SELECT COUNT(*) as c FROM (SELECT * FROM leads WHERE id IN (SELECT MAX(id) FROM leads GROUP BY user_id)) WHERE lead_score>=40 AND lead_score<60")["c"],
+        "60-80": uq1("SELECT COUNT(*) as c FROM (SELECT * FROM leads WHERE id IN (SELECT MAX(id) FROM leads GROUP BY user_id)) WHERE lead_score>=60 AND lead_score<80")["c"],
+        "80-100":uq1("SELECT COUNT(*) as c FROM (SELECT * FROM leads WHERE id IN (SELECT MAX(id) FROM leads GROUP BY user_id)) WHERE lead_score>=80")["c"],
     }
     return {
         "total_leads": total, "by_tier": by_tier, "avg_lead_score": avg_score,
@@ -329,7 +350,10 @@ def campaign_influence(_=Depends(mkt_auth)):
 # ── EXPLAINABILITY ────────────────────────────────────────────────────────────
 @app.get("/api/mkt/leads/{lead_id}/explain")
 def explain_lead_score(lead_id: int, _=Depends(mkt_auth)):
-    from explain import explain_lead
+    """Factors are computed by the model at scoring time (what each signal added
+    or removed, in points) and stored on the lead. Older leads fall back to the
+    rule-of-thumb explanation."""
+    import json as _json
     lead = uq1("""
         SELECT l.*, up.current_occupation FROM leads l
         LEFT JOIN user_profiles up ON up.user_id=l.user_id
@@ -337,12 +361,78 @@ def explain_lead_score(lead_id: int, _=Depends(mkt_auth)):
     """, (lead_id,))
     if not lead:
         raise HTTPException(404, "Lead not found")
-    lead["past_purchases"] = uq1(
-        "SELECT COUNT(*) as n FROM purchases WHERE user_id=?", (lead["user_id"],)
-    )["n"]
+    factors = None
+    if lead.get("score_factors"):
+        try:
+            factors = _json.loads(lead["score_factors"]) or None
+        except ValueError:
+            factors = None
+    if not factors:
+        from explain import explain_lead
+        lead["past_purchases"] = uq1(
+            "SELECT COUNT(*) as n FROM purchases WHERE user_id=?", (lead["user_id"],)
+        )["n"]
+        factors = explain_lead(lead)
     return {"lead_id": lead_id, "lead_score": lead["lead_score"],
             "recommended_action": lead["recommended_action"],
-            "factors": explain_lead(lead)}
+            "model_version": lead.get("model_version"),
+            "factors": factors}
+
+
+@app.post("/api/mkt/leads/{lead_id}/rescore")
+def rescore_lead(lead_id: int, _=Depends(mkt_auth)):
+    lead = uq1("SELECT user_id FROM leads WHERE id=?", (lead_id,))
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    res = request_rescore(lead["user_id"], "manual_rescore")
+    if res is None:
+        raise HTTPException(503, "User backend unreachable — is it running on port 8000?")
+    return res
+
+
+# ── MODEL HEALTH (closed-loop monitoring) ─────────────────────────────────────
+@app.get("/api/mkt/model/health")
+def model_health(window_days: int = 14, _=Depends(mkt_auth)):
+    """
+    Is the model telling the truth on REAL users? For every score snapshot old
+    enough to know the outcome (or already followed by a purchase), compare the
+    predicted probability with what actually happened, per tier.
+    """
+    import json as _json
+    card = None
+    try:
+        with open(MODEL_CARD_PATH, encoding="utf-8") as f:
+            card = _json.load(f)
+    except (OSError, ValueError):
+        pass
+    window = f"+{int(window_days)} days"
+    try:
+        rows = uq(f"""
+            SELECT s.tier, s.probability,
+                   EXISTS(SELECT 1 FROM purchases p WHERE p.user_id=s.user_id
+                          AND p.purchased_at >= s.created_at
+                          AND p.purchased_at <= datetime(s.created_at, '{window}')) AS converted,
+                   (s.created_at <= datetime('now','localtime','-{int(window_days)} days')) AS matured
+            FROM score_snapshots s
+            WHERE s.source != 'purchase_conversion'
+              AND NOT EXISTS(SELECT 1 FROM purchases p WHERE p.user_id=s.user_id
+                             AND p.purchased_at <= s.created_at)      -- already a customer
+        """)
+    except sqlite3.OperationalError:
+        rows = []
+    labelled = [r for r in rows if r["converted"] or r["matured"]]
+    order = ["Target Immediately", "Nurture via Email/WhatsApp", "Marketing Campaign", "Low Priority"]
+    tiers = []
+    for t in order:
+        g = [r for r in labelled if r["tier"] == t]
+        if g:
+            tiers.append({"tier": t, "snapshots": len(g),
+                          "predicted_rate": round(sum(r["probability"] or 0 for r in g) / len(g), 3),
+                          "actual_rate": round(sum(r["converted"] for r in g) / len(g), 3)})
+    return {"model": card, "window_days": window_days,
+            "snapshots_total": len(rows), "snapshots_labelled": len(labelled),
+            "by_tier": tiers,
+            "retrain_hint": "Run retrain-model.bat once you have 50+ labelled snapshots with some purchases."}
 
 
 # ── EMAIL ─────────────────────────────────────────────────────────────────────
@@ -378,9 +468,8 @@ def send_email_to_lead(req: SendEmailReq, _=Depends(mkt_auth)):
 # Engagement is tracked exclusively by this real click-through, not an
 # invisible pixel: most email clients block remote images by default, so a
 # pixel-based "open" signal was unreliable and often just never fired. A
-# click both proves the email was opened AND shows genuine intent, so it
-# carries the combined score bump (+10) and marks the send as opened+clicked.
-CLICK_SCORE_BUMP = 10
+# click both proves the email was opened AND shows genuine intent; it marks the
+# send as opened+clicked and triggers a model rescore of the lead.
 
 def _safe_redirect(to: str) -> str:
     # Only ever redirect to our own site - otherwise anyone could use this
@@ -390,6 +479,9 @@ def _safe_redirect(to: str) -> str:
 
 @app.get("/api/mkt/track/click/{token}")
 def track_click(token: str, to: str = USER_FRONTEND_URL):
+    """A click proves the email was opened AND shows intent. Instead of adding a
+    hand-picked +10 (which changed the score but not the tier), we record the
+    click and ask the model to rescore the lead — EmailOpenedCount is a model feature."""
     to = _safe_redirect(to)
     send = uq1("SELECT * FROM email_sends WHERE token=?", (token,))
     if send:
@@ -398,16 +490,8 @@ def track_click(token: str, to: str = USER_FRONTEND_URL):
                opened_at = COALESCE(opened_at, datetime('now','localtime')),
                first_clicked_at = COALESCE(first_clicked_at, datetime('now','localtime'))
                WHERE token=?""", (token,))
-        lead = uq1("SELECT * FROM leads WHERE id=?", (send["lead_id"],)) if send["lead_id"] else None
-        if lead:
-            old_score = lead["lead_score"] or 0
-            new_score = min(100, old_score + CLICK_SCORE_BUMP)
-            uex("UPDATE leads SET email_opened_count = email_opened_count + 1, lead_score=? WHERE id=?",
-                (new_score, lead["id"]))
-            uex("""INSERT INTO lead_score_history (lead_id, user_id, old_score, new_score, old_tier, new_tier, reason)
-                   VALUES (?,?,?,?,?,?,?)""",
-                (lead["id"], lead["user_id"], old_score, new_score,
-                 lead["recommended_action"], lead["recommended_action"], "email_click"))
+        if send["user_id"]:
+            request_rescore(send["user_id"], "email_click")
     return RedirectResponse(to)
 
 

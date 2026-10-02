@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
-import { login as loginApi, startSession } from '../utils/api'
+import { login as loginApi } from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 import { tracker } from '../utils/tracker'
 
@@ -19,7 +19,7 @@ export default function Login() {
       const r  = await loginApi(form)
       const sid = r.data.session_id
       login(r.data.token, r.data.user, sid)
-      tracker.setSession(sid)
+      tracker.newSession()   // every login is a new visit, with real device + source
       if (!r.data.profile_complete) navigate('/complete-profile', { replace: true })
       else navigate(from, { replace: true })
     } catch(err) { setError(err.response?.data?.detail || 'Login failed') }

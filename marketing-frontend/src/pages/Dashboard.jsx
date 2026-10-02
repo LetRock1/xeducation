@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link }                from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts'
-import { getStats, exportCsv, getCampaignInfluence } from '../utils/api'
+import { getStats, exportCsv, getCampaignInfluence, getModelHealth } from '../utils/api'
 
 const TIER_COLORS = {
   'Target Immediately':'#f97316',
@@ -16,10 +16,12 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [exporting, setExp]   = useState(false)
   const [influence, setInfluence] = useState(null)
+  const [health,    setHealth]    = useState(null)
 
   useEffect(() => {
     getStats().then(r => setStats(r.data)).catch(() => {}).finally(() => setLoading(false))
     getCampaignInfluence().then(r => setInfluence(r.data.campaign_influence)).catch(() => {})
+    getModelHealth().then(r => setHealth(r.data)).catch(() => {})
   }, [])
 
   async function handleExport() {
@@ -53,6 +55,45 @@ export default function Dashboard() {
           {exporting ? '⏳ Exporting…' : '⬇️ Export CSV'}
         </button>
       </div>
+
+      {/* Model health — closed-loop check of the ML model on real users */}
+      {health && (
+        <div className="card p-5 mb-8">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+            <h2 className="font-display text-lg font-bold text-white">Model health</h2>
+            <p className="text-slate-500 text-xs">
+              {health.model
+                ? `${health.model.version} · ${health.model.model_type?.replace('_',' ')} · AUC ${health.model.metrics?.roc_auc} · trained on ${health.model.trained_on?.synthetic_rows?.toLocaleString() || 0} synthetic + ${health.model.trained_on?.real_rows || 0} real leads`
+                : 'No trained model found — run train-model.bat'}
+            </p>
+          </div>
+          {health.by_tier.length === 0 ? (
+            <p className="text-slate-400 text-sm">
+              {health.snapshots_total} score snapshots recorded, none with a known outcome yet.
+              Each purchase labels the earlier snapshots of that user as converted; after {health.window_days} days
+              snapshots without a purchase count as not converted.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="text-slate-500 text-left">
+                  <th className="py-1 pr-4 font-medium">Tier</th><th className="py-1 pr-4 font-medium">Snapshots</th>
+                  <th className="py-1 pr-4 font-medium">Predicted conversion</th><th className="py-1 font-medium">Actual conversion</th>
+                </tr></thead>
+                <tbody>
+                  {health.by_tier.map(t => (
+                    <tr key={t.tier} className="border-t border-white/5 text-slate-300">
+                      <td className="py-1.5 pr-4">{t.tier}</td><td className="py-1.5 pr-4">{t.snapshots}</td>
+                      <td className="py-1.5 pr-4">{(t.predicted_rate*100).toFixed(0)}%</td>
+                      <td className="py-1.5">{(t.actual_rate*100).toFixed(0)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

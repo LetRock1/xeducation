@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useEffect } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
-import { tracker }          from './utils/tracker'
+import { tracker, captureSource } from './utils/tracker'
 import Navbar               from './components/Navbar'
 import Footer               from './components/Footer'
 import ChatWidget           from './components/ChatWidget'
@@ -18,9 +18,18 @@ import Checkout             from './pages/Checkout'
 import Enquiry              from './pages/Enquiry'
 import ThankYou             from './pages/ThankYou'
 
+captureSource()   // remember utm_source / referrer of the landing page
+
 function ScrollTop() {
   const { pathname } = useLocation()
-  useEffect(() => {window.scrollTo(0, 0)}, [pathname])
+  const { user } = useAuth()
+  useEffect(() => { window.scrollTo(0, 0) }, [pathname])
+  // time-on-page tracking for every page (feeds TotalTimeOnWebsite / PageViewsPerVisit)
+  useEffect(() => {
+    if (!user) return
+    const m = pathname.match(/^\/courses\/([^/]+)/)
+    tracker.pageChange(m ? m[1] : null)
+  }, [pathname, user])
   return null
 }
 
@@ -36,8 +45,6 @@ function Protected({ children }) {
 }
 
 function AppShell() {
-  const { sessionId } = useAuth()
-  useEffect(() => { if (sessionId) tracker.setSession(sessionId) }, [sessionId])
   return (
     <>
       <ScrollTop />

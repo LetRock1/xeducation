@@ -230,6 +230,22 @@ def init_db():
         created_at TEXT DEFAULT (datetime('now','localtime'))
     )""")
 
+    # ── 17. SCORE SNAPSHOTS (closed loop: features + prediction, later
+    #        labelled by whether the user actually bought → retraining data) ──
+    c.execute("""CREATE TABLE IF NOT EXISTS score_snapshots (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id        INTEGER REFERENCES users(id),
+        source         TEXT,
+        features_json  TEXT NOT NULL,
+        probability    REAL,
+        lead_score     REAL,
+        tier           TEXT,
+        model_version  TEXT,
+        created_at     TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_snap_user ON score_snapshots(user_id, created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_events_user ON behaviour_events(user_id, event_type)")
+
     conn.commit()
 
     # ── Additive migrations for pre-existing DBs ─────────────────────
@@ -238,6 +254,8 @@ def init_db():
         "ALTER TABLE leads ADD COLUMN last_active_at TEXT",
         "ALTER TABLE leads ADD COLUMN decayed INTEGER DEFAULT 0",
         "ALTER TABLE email_sends ADD COLUMN ab_test_id INTEGER",
+        "ALTER TABLE leads ADD COLUMN score_factors TEXT",
+        "ALTER TABLE leads ADD COLUMN model_version TEXT",
     ):
         try:
             c.execute(col_sql)
@@ -316,73 +334,91 @@ def get_qna(course_slug):
 
 def get_user_lead(user_id):
     return fetchone(
-        "SELECT * FROM leads WHERE user_id=? ORDER BY created_at DESC LIMIT 1",
+        "SELECT * FROM leads WHERE user_id=? ORDER BY created_at DESC, id DESC LIMIT 1",
         (user_id,)
     )
 
 
-# ── FIXED get_behaviour_summary ───────────────────────────────────────────────
+# ── Behaviour summary → the model's auto-tracked features ───────────────────
 def get_behaviour_summary(user_id):
-    """Fixed version - No more closed database error"""
+    """
+    Aggregates everything the website tracked for this user into the same
+    quantities the model was trained on:
+      total_visits          distinct sessions that produced at least one event
+                            (a new session starts after 30 min of inactivity)
+      total_time_on_website seconds summed from page_view events
+      page_views_per_visit  page_view events / visits
+      flags                 1 if the event ever happened
+    """
     conn = get_conn()
     try:
-        # Count sessions
-        sessions = conn.execute(
-            "SELECT COUNT(*) as cnt FROM user_sessions WHERE user_id=?", 
-            (user_id,)
-        ).fetchone()["cnt"]
+        q = lambda sql, *a: conn.execute(sql, (user_id, *a)).fetchone()
 
-        # Total time
-        time_total = conn.execute(
-            "SELECT COALESCE(SUM(time_spent_sec),0) as t FROM behaviour_events WHERE user_id=?", 
-            (user_id,)
-        ).fetchone()["t"]
+        visits = q("SELECT COUNT(DISTINCT session_id) AS c FROM behaviour_events "
+                   "WHERE user_id=? AND session_id IS NOT NULL")["c"] or 0
+        visits = max(visits, 1)
+        time_total = q("SELECT COALESCE(SUM(time_spent_sec),0) AS t FROM behaviour_events "
+                       "WHERE user_id=? AND event_type='page_view'")["t"] or 0
+        pv = q("SELECT COUNT(*) AS c FROM behaviour_events "
+               "WHERE user_id=? AND event_type='page_view'")["c"] or 0
 
-        # Page views
-        pv = conn.execute(
-            "SELECT COUNT(*) as c FROM behaviour_events WHERE user_id=? AND event_type='page_view'",
-            (user_id,)
-        ).fetchone()["c"]
+        counts = {r["event_type"]: r["c"] for r in conn.execute(
+            "SELECT event_type, COUNT(*) AS c FROM behaviour_events WHERE user_id=? GROUP BY event_type",
+            (user_id,)).fetchall()}
+        has = lambda *types: int(any(counts.get(t, 0) > 0 for t in types))
 
-        # Distinct visits
-        visits = conn.execute(
-            "SELECT COUNT(DISTINCT session_id) as c FROM behaviour_events WHERE user_id=?",
-            (user_id,)
-        ).fetchone()["c"] or 1
+        in_cart = q("SELECT COUNT(*) AS c FROM cart WHERE user_id=?")["c"]
+        in_wishlist = q("SELECT COUNT(*) AS c FROM wishlist WHERE user_id=?")["c"]
+        checkouts = q("SELECT COUNT(*) AS c FROM checkout_sessions WHERE user_id=?")["c"]
+        enquiries = q("SELECT COUNT(*) AS c FROM leads WHERE user_id=? AND trigger_reason='enquiry'")["c"]
 
-        # Most viewed course
-        row = conn.execute("""
-            SELECT course_slug, COUNT(*) as cnt 
-            FROM behaviour_events
-            WHERE user_id=? AND course_slug IS NOT NULL
-            GROUP BY course_slug 
-            ORDER BY cnt DESC LIMIT 1
-        """, (user_id,)).fetchone()
-        top_course = dict(row)["course_slug"] if row else None
-
-        # Helper to check if event exists
-        def has_event(evt_type):
-            count = conn.execute(
-                "SELECT COUNT(*) as c FROM behaviour_events WHERE user_id=? AND event_type=?",
-                (user_id, evt_type)
-            ).fetchone()["c"]
-            return int(count > 0)
+        row = q("""SELECT course_slug, COUNT(*) AS cnt FROM behaviour_events
+                   WHERE user_id=? AND course_slug IS NOT NULL
+                   GROUP BY course_slug ORDER BY cnt DESC LIMIT 1""")
+        last_session = q("SELECT device_type FROM user_sessions WHERE user_id=? "
+                         "AND device_type IS NOT NULL ORDER BY id DESC LIMIT 1")
+        # acquisition source = first visit that came from somewhere specific
+        first_source = q("SELECT lead_source FROM user_sessions WHERE user_id=? "
+                         "AND lead_source IS NOT NULL AND lead_source != 'Direct Traffic' "
+                         "ORDER BY id ASC LIMIT 1")
 
         return {
-            "sessions_count":        max(sessions or 1, 1),
-            "total_time_on_website": min(time_total or 0, 4000),
-            "page_views_per_visit":  round(pv / visits, 1) if visits > 0 else 1.0,
             "total_visits":          visits,
-            "video_watched":         has_event("video_play"),
-            "brochure_downloaded":   has_event("brochure_dl"),
-            "chat_initiated":        has_event("chat"),
-            "pricing_page_visited":  has_event("pricing_view"),
-            "testimonial_visited":   has_event("testimonial_view"),
-            "webinar_attended":      has_event("webinar_view"),
-            "top_course_slug":       top_course,
+            "sessions_count":        visits,
+            "total_time_on_website": int(min(time_total, 6000)),
+            "page_views_per_visit":  round(pv / visits, 1),
+            "video_watched":         has("video_play"),
+            "brochure_downloaded":   has("brochure_dl"),
+            "chat_initiated":        has("chat"),
+            "pricing_page_visited":  has("pricing_view"),
+            "testimonial_visited":   has("testimonial_view"),
+            "webinar_attended":      has("webinar_view", "webinar_register"),
+            "added_to_wishlist":     int(has("wishlist_add") or in_wishlist > 0),
+            "added_to_cart":         int(has("cart_add") or in_cart > 0),
+            "checkout_started":      int(has("checkout_start") or checkouts > 0),
+            "enquiry_submitted":     int(has("enquiry_submit") or enquiries > 0),
+            "top_course_slug":       row["course_slug"] if row else None,
+            "device_type":           last_session["device_type"] if last_session else None,
+            "lead_source":           first_source["lead_source"] if first_source else None,
         }
     finally:
-        conn.close()   # ← Always close safely
+        conn.close()
+
+
+def add_score_snapshot(user_id, source, features, probability, lead_score, tier,
+                       model_version, min_gap_minutes=0):
+    """Store what the model saw + what it predicted. Later labelled by purchases."""
+    import json
+    if min_gap_minutes:
+        recent = fetchone("""SELECT id FROM score_snapshots WHERE user_id=? AND source=?
+                             AND created_at >= datetime('now','localtime',?)""",
+                          (user_id, source, f"-{int(min_gap_minutes)} minutes"))
+        if recent:
+            return None
+    return execute("""INSERT INTO score_snapshots
+        (user_id, source, features_json, probability, lead_score, tier, model_version)
+        VALUES (?,?,?,?,?,?,?)""",
+        (user_id, source, json.dumps(features), probability, lead_score, tier, model_version))
 
 
 def get_abandoned_carts():
@@ -491,14 +527,26 @@ def get_users_with_old_wishlist(minutes=30):
 def recent_lead_exists(user_id, trigger, hours=6):
     """
     Prevent duplicate leads within cooldown window.
+    trigger may be a single trigger, a list/tuple of triggers, or None (= any).
     """
-    row = fetchone("""
-        SELECT id FROM leads
-        WHERE user_id=? AND trigger_reason=?
-        AND created_at >= datetime('now','localtime', ?)
-        LIMIT 1
-    """, (user_id, trigger, f"-{hours} hours"))
-    return row is not None
+    if trigger is None:
+        triggers = None
+    elif isinstance(trigger, (list, tuple)):
+        triggers = list(trigger)
+    else:
+        triggers = [trigger]
+    sql = "SELECT id FROM leads WHERE user_id=? AND created_at >= datetime('now','localtime', ?)"
+    params = [user_id, f"-{hours} hours"]
+    if triggers:
+        sql += f" AND trigger_reason IN ({','.join('?' * len(triggers))})"
+        params += triggers
+    return fetchone(sql + " LIMIT 1", tuple(params)) is not None
+
+
+def get_attribution_lead(user_id):
+    """The latest lead that actually reached the user (email sent or enquiry)."""
+    return fetchone("""SELECT * FROM leads WHERE user_id=? AND (email_sent=1 OR trigger_reason='enquiry')
+                       ORDER BY created_at DESC, id DESC LIMIT 1""", (user_id,))
 
 
 # ============================================================
@@ -548,6 +596,8 @@ def mark_checkout_email_sent(checkout_id):
 # ============================================================
 
 def insert_email_send(token, user_id, lead_id=None, campaign_id=None, variant="A", subject="", body=""):
+    if lead_id:
+        execute("UPDATE leads SET email_sent=1, email_sent_at=datetime('now','localtime') WHERE id=?", (lead_id,))
     return execute("""
         INSERT INTO email_sends (lead_id, user_id, campaign_id, variant, token, subject, body)
         VALUES (?,?,?,?,?,?,?)

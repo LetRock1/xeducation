@@ -12,7 +12,9 @@ from dotenv import load_dotenv
 
 import database as db
 import auth
-from predict         import predict_lead
+from predict         import predict_lead, model_info
+from scoring         import score_user, save_lead, rescore_latest_lead
+import ml_features   as F
 from genai_mock      import generate_content
 from email_service   import send_otp_email, send_purchase_confirmation_email, ATTRIBUTION_LABELS
 from recommendations import get_recommendations
@@ -220,128 +222,52 @@ def update_preferences(body: dict, user=Depends(get_current_user)):
 
 
 # ── BEHAVIOUR TRACKING ────────────────────────────────────────────────────────
+TRACKED_EVENTS = {
+    "page_view", "video_play", "brochure_dl", "chat", "pricing_view",
+    "testimonial_view", "webinar_view", "webinar_register", "cart_add",
+    "wishlist_add", "checkout_start", "enquiry_submit",
+}
+
 @app.post("/api/track")
 def track_event(body: BehaviourEvent, user=Depends(get_current_user)):
-    # 1. Insert the raw event
+    if body.event_type not in TRACKED_EVENTS:
+        raise HTTPException(400, f"Unknown event type '{body.event_type}'")
+    # A session id from another user (stale localStorage) must not be counted
+    sess = db.fetchone("SELECT id FROM user_sessions WHERE id=? AND user_id=?",
+                       (body.session_id, user["id"]))
+    session_id = sess["id"] if sess else None
+    seconds = max(0, min(int(body.time_spent_sec or 0), 1800))   # cap 30 min per page
     db.execute("""
-        INSERT INTO behaviour_events
-        (user_id, session_id, course_slug, event_type, time_spent_sec)
+        INSERT INTO behaviour_events (user_id, session_id, course_slug, event_type, time_spent_sec)
         VALUES (?,?,?,?,?)
-    """, (user["id"], body.session_id, body.course_slug, body.event_type, body.time_spent_sec))
+    """, (user["id"], session_id, body.course_slug, body.event_type, seconds))
+    if session_id:
+        db.execute("UPDATE user_sessions SET last_active=datetime('now','localtime') WHERE id=?",
+                   (session_id,))
 
-    # 2. Update session last_active
-    db.execute(
-        "UPDATE user_sessions SET last_active=datetime('now','localtime') WHERE id=?",
-        (body.session_id,)
-    )
+    # Re-score live. A snapshot for closed-loop retraining is kept at most every 30 min.
+    pred = score_user(user["id"], source="activity", snapshot_gap_minutes=30)
+    return {"tracked": True, "live_score": pred["lead_score"], "persona": pred["persona"],
+            "tier": pred["recommended_action"]}
 
-    # 3. Gather data for ML scoring
-    profile    = db.get_profile(user["id"]) or {}
-    behaviour  = db.get_behaviour_summary(user["id"])
-    engagement = db.get_email_engagement(user["id"])
-
-    raw = {
-        "LeadOrigin":"Website Interaction",
-        "LeadSource":"Direct Traffic",
-        "DeviceType":"Desktop",
-        "TotalVisits": behaviour["total_visits"],
-        "TotalTimeOnWebsite": behaviour["total_time_on_website"],
-        "PageViewsPerVisit": behaviour["page_views_per_visit"],
-        "SessionsCount": behaviour["sessions_count"],
-        "VideoWatched": behaviour["video_watched"],
-        "BrochureDownloaded": behaviour["brochure_downloaded"],
-        "ChatInitiated": behaviour["chat_initiated"],
-        "PricingPageVisited": behaviour["pricing_page_visited"],
-        "TestimonialVisited": behaviour["testimonial_visited"],
-        "WebinarAttended": behaviour["webinar_attended"],
-        "EmailOpenedCount": engagement["opens"],
-        "CurrentOccupation":profile.get("current_occupation","Unemployed"),
-        "Specialization":profile.get("specialization","Business"),
-        "CourseType":"Browsing",
-        "City":profile.get("city","Unknown"),
-        "Country":profile.get("country","India"),
-        "AgeBracket":profile.get("age_bracket"),
-        "HowDidYouHear":profile.get("how_did_you_hear","Unknown"),
-        "DoNotEmail":profile.get("do_not_email","No"),
-        "DoNotCall":profile.get("do_not_call","No"),
-        "WhatsAppOptIn":profile.get("whatsapp_opt_in",0),
-        "wishlist_count": len(db.get_wishlist(user["id"])),
-        "past_purchases": len(db.get_purchases(user["id"])),
-    }
-
-    # 4. ML prediction (NO lead creation)
-    from predict import predict_lead
-    pred = predict_lead(raw)
-
-    # 5. Update LIVE state table (visible only to user dashboard)
-    db.execute("""
-        INSERT INTO live_user_state (user_id, live_score, persona, updated_at)
-        VALUES (?, ?, ?, datetime('now','localtime'))
-        ON CONFLICT(user_id) DO UPDATE SET
-            live_score = excluded.live_score,
-            persona    = excluded.persona,
-            updated_at = excluded.updated_at
-    """, (user["id"], pred["lead_score"], pred["persona"]))
-
-    # 6. Return live score to frontend (optional, frontend can also call /live-score)
-    return {
-        "tracked": True,
-        "live_score": pred["lead_score"],
-        "persona": pred["persona"]
-    }
 
 @app.get("/api/live-score")
 def get_live_score(user=Depends(get_current_user)):
     row = db.fetchone("SELECT live_score, persona FROM live_user_state WHERE user_id=?", (user["id"],))
-    if row:
+    if row and row["live_score"] is not None:
         return {"lead_score": row["live_score"], "persona": row["persona"]}
-    
-    # Fallback: compute a base score from current profile + behaviour
-    profile    = db.get_profile(user["id"]) or {}
-    behaviour  = db.get_behaviour_summary(user["id"])
-    engagement = db.get_email_engagement(user["id"])
-    raw = {
-        "LeadOrigin":"Website Interaction",
-        "LeadSource":"Direct Traffic",
-        "DeviceType":"Desktop",
-        "TotalVisits": behaviour["total_visits"],
-        "TotalTimeOnWebsite": behaviour["total_time_on_website"],
-        "PageViewsPerVisit": behaviour["page_views_per_visit"],
-        "SessionsCount": behaviour["sessions_count"],
-        "VideoWatched": behaviour["video_watched"],
-        "BrochureDownloaded": behaviour["brochure_downloaded"],
-        "ChatInitiated": behaviour["chat_initiated"],
-        "PricingPageVisited": behaviour["pricing_page_visited"],
-        "TestimonialVisited": behaviour["testimonial_visited"],
-        "WebinarAttended": behaviour["webinar_attended"],
-        "EmailOpenedCount": engagement["opens"],
-        "CurrentOccupation":profile.get("current_occupation","Unemployed"),
-        "Specialization":profile.get("specialization","Business"),
-        "CourseType":"Browsing",
-        "City":profile.get("city","Unknown"),
-        "Country":profile.get("country","India"),
-        "AgeBracket":profile.get("age_bracket"),
-        "HowDidYouHear":profile.get("how_did_you_hear","Unknown"),
-        "DoNotEmail":profile.get("do_not_email","No"),
-        "DoNotCall":profile.get("do_not_call","No"),
-        "WhatsAppOptIn":profile.get("whatsapp_opt_in",0),
-        "wishlist_count": len(db.get_wishlist(user["id"])),
-        "past_purchases": len(db.get_purchases(user["id"])),
-    }
-    pred = predict_lead(raw)
-    db.execute("""
-        INSERT INTO live_user_state (user_id, live_score, persona)
-        VALUES (?,?,?)
-        ON CONFLICT(user_id) DO UPDATE SET live_score=excluded.live_score, persona=excluded.persona
-    """, (user["id"], pred["lead_score"], pred["persona"]))
+    pred = score_user(user["id"], source="live_score", snapshot_gap_minutes=60)
     return {"lead_score": pred["lead_score"], "persona": pred["persona"]}
 
 
 @app.post("/api/session/start")
 def start_session(body: dict, user=Depends(get_current_user)):
+    """Called by the website at the start of every visit (new tab, or after 30 min idle)."""
+    device = body.get("device_type") if body.get("device_type") in F.DEVICE_TYPES else "Desktop"
+    source = body.get("lead_source") if body.get("lead_source") in F.LEAD_SOURCES else "Direct Traffic"
     sid = db.execute(
         "INSERT INTO user_sessions (user_id, device_type, lead_source) VALUES (?,?,?)",
-        (user["id"], body.get("device_type","Desktop"), body.get("lead_source","Direct Traffic"))
+        (user["id"], device, source)
     )
     return {"session_id": sid}
 
@@ -441,8 +367,8 @@ def checkout(body: CheckoutRequest, user=Depends(get_current_user)):
         else:
             raise HTTPException(400, "Invalid or expired coupon code.")
 
-    # Capture the lead as it stood before this purchase, for attribution credit
-    prior_lead = db.get_user_lead(user["id"])
+    # Credit the last touch that actually reached the user (an email or their enquiry)
+    prior_lead = db.get_attribution_lead(user["id"])
 
     purchased  = []
     total_paid = 0.0
@@ -469,57 +395,10 @@ def checkout(body: CheckoutRequest, user=Depends(get_current_user)):
 
     db.complete_latest_checkout_session(user["id"])
 
-    # ── CLOSED LOOP: rescore the lead on actual conversion, using the pkl model ──
-    profile    = db.get_profile(user["id"]) or {}
-    behaviour  = db.get_behaviour_summary(user["id"])
-    engagement = db.get_email_engagement(user["id"])
-    purchases  = db.get_purchases(user["id"])
-
-    raw = {
-        "LeadOrigin":         "Landing Page Submission",
-        "LeadSource":          "Direct Traffic",
-        "DeviceType":          "Desktop",
-        "TotalVisits":         behaviour["total_visits"],
-        "TotalTimeOnWebsite":  behaviour["total_time_on_website"],
-        "PageViewsPerVisit":   behaviour["page_views_per_visit"],
-        "SessionsCount":       behaviour["sessions_count"],
-        "VideoWatched":        behaviour["video_watched"],
-        "BrochureDownloaded":  behaviour["brochure_downloaded"],
-        "ChatInitiated":       behaviour["chat_initiated"],
-        "PricingPageVisited":  behaviour["pricing_page_visited"],
-        "TestimonialVisited":  behaviour["testimonial_visited"],
-        "WebinarAttended":     behaviour["webinar_attended"],
-        "EmailOpenedCount":    engagement["opens"],
-        "CurrentOccupation":   profile.get("current_occupation", "Unemployed"),
-        "Specialization":      profile.get("specialization", "Business Administration"),
-        "CourseType":          purchased[0] if purchased else "Browsing",
-        "City":                profile.get("city", "Unknown"),
-        "Country":             profile.get("country", "India"),
-        "AgeBracket":          profile.get("age_bracket"),
-        "HowDidYouHear":       profile.get("how_did_you_hear", "Unknown"),
-        "DoNotEmail":          profile.get("do_not_email", "No"),
-        "DoNotCall":           profile.get("do_not_call", "No"),
-        "WhatsAppOptIn":       profile.get("whatsapp_opt_in", 0),
-        "enquiry_submitted":   False,
-        "cart_abandoned":      False,
-        "wishlist_count":      len(db.get_wishlist(user["id"])),
-        "past_purchases":      len(purchases),
-    }
-    pred = predict_lead(raw)
-    plv  = db.compute_plv(user["id"], pred["recommended_action"], pred["conversion_probability"])
-
-    if prior_lead:
-        db.execute("""
-            UPDATE leads SET lead_score=?, conversion_probability=?, recommended_action=?,
-                              plv=?, email_opened_count=? WHERE id=?
-        """, (pred["lead_score"], pred["conversion_probability"], pred["recommended_action"],
-              plv, engagement["opens"], prior_lead["id"]))
-        db.log_score_change(
-            prior_lead["id"], user["id"],
-            prior_lead["lead_score"], pred["lead_score"],
-            prior_lead["recommended_action"], pred["recommended_action"],
-            "purchase_conversion"
-        )
+    # ── CLOSED LOOP: the purchase is the real outcome. Rescore the lead with the
+    # model (so the dashboard shows it), and the score_snapshots taken before
+    # this moment now get labelled "converted" for retraining (ml/retrain_from_live.py).
+    _, pred = rescore_latest_lead(user["id"], "purchase_conversion")
 
     # ── Attributed, properly-branded purchase confirmation email ──
     channel = prior_lead["trigger_reason"] if prior_lead else None
@@ -544,99 +423,32 @@ def get_purchases(user=Depends(get_current_user)):
 # ── ENQUIRY ───────────────────────────────────────────────────────────────────
 @app.post("/api/enquiry")
 def submit_enquiry(body: EnquiryRequest, user=Depends(get_current_user)):
-    profile    = db.get_profile(user["id"]) or {}
-    behaviour  = db.get_behaviour_summary(user["id"])
-    purchases  = db.get_purchases(user["id"])
-    engagement = db.get_email_engagement(user["id"])
+    profile   = db.get_profile(user["id"]) or {}
+    purchases = db.get_purchases(user["id"])
 
-    # Update phone + whatsapp if provided
     if body.phone:
         db.execute(
             "UPDATE user_profiles SET phone=?, whatsapp_opt_in=? WHERE user_id=?",
             (body.phone, body.whatsapp_opt_in, user["id"])
         )
+    db.execute("INSERT INTO behaviour_events (user_id, course_slug, event_type) VALUES (?,?,?)",
+               (user["id"], body.course_slug, "enquiry_submit"))
 
-    raw = {
-        "LeadOrigin":         "Landing Page Submission",
-        "LeadSource":          body.lead_source or "Direct Traffic",
-        "DeviceType":          "Desktop",
-        "TotalVisits":         behaviour["total_visits"],
-        "TotalTimeOnWebsite":  behaviour["total_time_on_website"],
-        "PageViewsPerVisit":   behaviour["page_views_per_visit"],
-        "SessionsCount":       behaviour["sessions_count"],
-        "VideoWatched":        behaviour["video_watched"],
-        "BrochureDownloaded":  behaviour["brochure_downloaded"],
-        "ChatInitiated":       behaviour["chat_initiated"],
-        "PricingPageVisited":  behaviour["pricing_page_visited"],
-        "TestimonialVisited":  behaviour["testimonial_visited"],
-        "WebinarAttended":     behaviour["webinar_attended"],
-        "EmailOpenedCount":    engagement["opens"],
-        "CurrentOccupation":   profile.get("current_occupation","Unemployed"),
-        "Specialization":      profile.get("specialization","Business Administration"),
-        "CourseType":          body.course_type,
-        "City":                profile.get("city","Unknown"),
-        "Country":             profile.get("country","India"),
-        "AgeBracket":          profile.get("age_bracket"),
-        "HowDidYouHear":       profile.get("how_did_you_hear","Unknown"),
-        "DoNotEmail":          profile.get("do_not_email","No"),
-        "DoNotCall":           profile.get("do_not_call","No"),
-        "WhatsAppOptIn":       body.whatsapp_opt_in or profile.get("whatsapp_opt_in",0),
-        "enquiry_submitted":   True,
-        "cart_abandoned":      False,
-        "wishlist_count":      len(db.get_wishlist(user["id"])),
-        "past_purchases":      len(purchases),
-    }
+    source = body.lead_source if body.lead_source and body.lead_source != "Direct Traffic" else None
+    prediction = score_user(user["id"], source="enquiry", course=body.course_slug, explain=True,
+                            lead_source=source, whatsapp_opt_in=body.whatsapp_opt_in or None)
 
-    prediction = predict_lead(raw)
-    content    = generate_content(
+    content = generate_content(
         name           = user["name"],
-        occupation     = profile.get("current_occupation","Professional"),
-        specialization = profile.get("specialization","your field"),
+        occupation     = profile.get("current_occupation") or "Professional",
+        specialization = profile.get("specialization") or "your field",
         course         = body.course_type,
         action         = prediction["recommended_action"],
         trigger        = "enquiry",
         past_purchases = len(purchases),
     )
+    lead_id = save_lead(user["id"], prediction, content, "enquiry", course_label=body.course_type)
 
-    lead_id = db.execute("""
-        INSERT INTO leads (
-            user_id, lead_origin, lead_source, device_type,
-            total_visits, total_time_on_website, page_views_per_visit,
-            sessions_count, video_watched, brochure_downloaded, chat_initiated,
-            pricing_page_visited, testimonial_visited, webinar_attended, email_opened_count,
-            course_type, lead_score, conversion_probability, persona,
-            customer_segment, recommended_action,
-            email_subject, email_body, whatsapp_message, coupon_code, call_script,
-            trigger_reason
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, (
-        user["id"], raw["LeadOrigin"], raw["LeadSource"], raw["DeviceType"],
-        raw["TotalVisits"], raw["TotalTimeOnWebsite"], raw["PageViewsPerVisit"],
-        raw["SessionsCount"], raw["VideoWatched"], raw["BrochureDownloaded"],
-        raw["ChatInitiated"], raw["PricingPageVisited"], raw["TestimonialVisited"],
-        raw["WebinarAttended"], raw["EmailOpenedCount"], body.course_type,
-        prediction["lead_score"], prediction["conversion_probability"],
-        prediction["persona"], prediction["customer_segment"], prediction["recommended_action"],
-        content["email_subject"], content["email_body"], content["whatsapp_message"],
-        content["coupon_code"], content["call_script"], "enquiry"
-    ))
-
-    # Issue coupon if applicable
-    if content["coupon_code"]:
-        _DISCOUNTS = {"VIP_URGENT_25": 25, "FUTURE_READY_15": 15, "EARLY_BIRD_10": 10, "LOYAL_20": 20}
-        discount = _DISCOUNTS.get(content["coupon_code"], 0)
-        if discount > 0:
-            db.execute("""
-                INSERT OR IGNORE INTO coupons_issued
-                (user_id, coupon_code, discount_pct, tier, expires_at)
-                VALUES (?,?,?,?,datetime('now','localtime','+72 hours'))
-            """, (user["id"], content["coupon_code"], discount, prediction["recommended_action"]))
-
-    # Persist Predictive Lifetime Value
-    plv = db.compute_plv(user["id"], prediction["recommended_action"], prediction["conversion_probability"])
-    db.update_lead_plv(lead_id, plv)
-
-    # Send confirmation email
     if profile.get("do_not_email") != "Yes":
         _send_tracked_email(user["id"], lead_id, user["email"], content["email_subject"], content["email_body"])
         db.execute("UPDATE leads SET email_sent=1, email_sent_at=datetime('now','localtime') WHERE id=?", (lead_id,))
@@ -715,6 +527,27 @@ def get_coupons(user=Depends(get_current_user)):
     )}
 
 
+# ── MODEL / INTERNAL ──────────────────────────────────────────────────────────
+INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "xedu-internal-dev")
+
+@app.get("/api/model/info")
+def get_model_info():
+    """Which model is live, when it was trained and how well it scored."""
+    return model_info()
+
+@app.post("/api/internal/rescore/{user_id}")
+def internal_rescore(user_id: int, reason: str = "email_click",
+                     x_internal_key: str = Header(None)):
+    """Called by the marketing backend (e.g. after an email click) to re-run the model."""
+    if x_internal_key != INTERNAL_API_KEY:
+        raise HTTPException(403, "Forbidden")
+    if not db.get_user_by_id(user_id):
+        raise HTTPException(404, "User not found")
+    lead, pred = rescore_latest_lead(user_id, reason)
+    return {"user_id": user_id, "lead_id": lead["id"] if lead else None,
+            "lead_score": pred["lead_score"], "tier": pred["recommended_action"]}
+
+
 # ── DEBUG / DEMO ENDPOINT ─────────────────────────────────────────────────────
 # For demo only: manually trigger background jobs without waiting 15 min/1 hr.
 # Remove this in production.
@@ -726,9 +559,6 @@ def trigger_jobs_manually():
     Open Postman / curl:
       POST http://localhost:8000/api/debug/trigger-jobs
     """
-    from scheduler import cart_abandonment_job, session_end_job, checkout_abandonment_job, wishlist_job
-    cart_abandonment_job()
-    session_end_job()
-    checkout_abandonment_job()
-    wishlist_job()
+    from scheduler import run_all_jobs
+    run_all_jobs()
     return {"message": "All jobs triggered manually. Check marketing dashboard."}

@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useAuth }          from '../context/AuthContext'
 import { getCourseBySlug }  from '../data/courses'
 import { addToCart, addToWishlist } from '../utils/api'
-import { tracker }          from '../utils/tracker'
+import { tracker, observeDwell } from '../utils/tracker'
 import ReviewSection        from '../components/ReviewSection'
 import QnASection           from '../components/QnASection'
 
@@ -53,28 +53,16 @@ export default function CourseDetail() {
   const [videoPlayed,  setVideoPlayed]  = useState(false)
   const [cartMsg,      setCartMsg]      = useState('')
   const [wishlistMsg,  setWishlistMsg]  = useState('')
-  const [timeStart]    = useState(Date.now())
 
+  // Pricing / testimonials count only after 4 s actually in view — scrolling
+  // past them used to fire instantly and made every visitor look "hot".
+  // (Time on page is tracked for every page in App.jsx.)
   useEffect(() => {
     if (!course) return
-    const pObs = new IntersectionObserver(([e]) => {
-      if (e.isIntersecting) { tracker.pricing(slug); pObs.disconnect() }
-    }, { threshold: 0.4 })
-    const tObs = new IntersectionObserver(([e]) => {
-      if (e.isIntersecting) { tracker.testimonial(slug); tObs.disconnect() }
-    }, { threshold: 0.3 })
-    if (pricingRef.current) pObs.observe(pricingRef.current)
-    if (testiRef.current)   tObs.observe(testiRef.current)
-    return () => { pObs.disconnect(); tObs.disconnect() }
-  }, [course])
-
-  useEffect(() => {
-    tracker.pageView(slug, 0)
-    return () => {
-      const sec = Math.floor((Date.now() - timeStart) / 1000)
-      tracker.pageView(slug, sec)
-    }
-  }, [])
+    const stopP = observeDwell(pricingRef.current, () => tracker.pricing(slug))
+    const stopT = observeDwell(testiRef.current,   () => tracker.testimonial(slug), { threshold: 0.3 })
+    return () => { stopP(); stopT() }
+  }, [course, slug])
 
   function handleVideo() {
     if (!user) { navigate('/login'); return }

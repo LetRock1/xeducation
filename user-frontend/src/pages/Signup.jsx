@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { signup, verifyOtp } from '../utils/api'
 import { useAuth } from '../context/AuthContext'
+import { tracker } from '../utils/tracker'
 
 export default function Signup() {
   const navigate = useNavigate()
@@ -28,6 +29,7 @@ export default function Signup() {
     try {
       const r = await verifyOtp({ email: form.email, otp })
       login(r.data.token, r.data.user, r.data.session_id || null)
+      tracker.newSession()
       navigate('/complete-profile', { replace: true })
     } catch(err) { setError(err.response?.data?.detail || 'Invalid OTP') }
     finally { setLoading(false) }

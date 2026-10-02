@@ -23,6 +23,13 @@ TIER_ORDER = [
     "Low Priority",
 ]
 
+TIER_CEILING = {
+    "Target Immediately": 100.0,
+    "Nurture via Email/WhatsApp": 79.9,
+    "Marketing Campaign": 59.9,
+    "Low Priority": 39.9,
+}
+
 PLV_TIER_MULTIPLIER = {
     "Target Immediately": 1.5,
     "Nurture via Email/WhatsApp": 1.0,
@@ -56,7 +63,9 @@ def lead_decay_job():
         ).fetchone()["c"]
 
         leads = conn.execute(
-            "SELECT * FROM leads WHERE recommended_action != 'Low Priority' AND decayed = 0"
+            "SELECT * FROM leads WHERE recommended_action != 'Low Priority' AND decayed = 0 "
+            "AND id IN (SELECT MAX(id) FROM leads GROUP BY user_id) "  # latest lead per user
+            "AND user_id NOT IN (SELECT user_id FROM purchases)"        # customers don't decay
         ).fetchall()
         print(f"[DECAY JOB] Checking {len(leads)} active-tier leads")
 
@@ -80,12 +89,14 @@ def lead_decay_job():
             new_tier = TIER_ORDER[min(idx + 1, len(TIER_ORDER) - 1)]
 
             new_plv = _recompute_plv(conn, user_id, new_tier, lead["conversion_probability"] or 0.5)
-            conn.execute("UPDATE leads SET recommended_action=?, decayed=1, plv=? WHERE id=?",
-                         (new_tier, new_plv, lead["id"]))
+            # keep score and tier consistent: cap the score at the new tier's ceiling
+            new_score = min(lead["lead_score"] or 0, TIER_CEILING[new_tier])
+            conn.execute("UPDATE leads SET recommended_action=?, lead_score=?, decayed=1, plv=? WHERE id=?",
+                         (new_tier, new_score, new_plv, lead["id"]))
             conn.execute(
                 """INSERT INTO lead_score_history (lead_id, user_id, old_score, new_score, old_tier, new_tier, reason)
                    VALUES (?,?,?,?,?,?,?)""",
-                (lead["id"], user_id, lead["lead_score"], lead["lead_score"],
+                (lead["id"], user_id, lead["lead_score"], new_score,
                  lead["recommended_action"], new_tier, "decay"),
             )
             downgraded += 1

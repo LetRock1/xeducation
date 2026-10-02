@@ -4,6 +4,8 @@ const a   = () => axios.create({ baseURL:'/api', headers: { Authorization: `Bear
 
 export const mktLogin        = d  => axios.post('/api/mkt/login', d)
 export const getStats        = () => a().get('/mkt/stats')
+export const getModelHealth  = () => a().get('/mkt/model/health')
+export const rescoreLead     = id => a().post(`/mkt/leads/${id}/rescore`)
 export const getLeads        = (tier, search, sort) => {
   let q = []
   if (tier)   q.push(`tier=${encodeURIComponent(tier)}`)
