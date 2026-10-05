@@ -1,0 +1,124 @@
+{
+  "aa_false_alarm_rate": 0.03725,
+  "ci_coverage": 0.95225,
+  "planned_per_arm": 686,
+  "power": 0.7985,
+  "srm_false_alarm_rate": 0.0,
+  "srm_detection_10pct": 0.076,
+  "srm_detection_30pct": 1.0,
+  "adoption": [
+    {
+      "people": 400,
+      "truth": "better",
+      "confirmed": 0.06,
+      "checking": 0.94,
+      "reverted": 0.0
+    },
+    {
+      "people": 400,
+      "truth": "no difference",
+      "confirmed": 0.03,
+      "checking": 0.92,
+      "reverted": 0.05
+    },
+    {
+      "people": 400,
+      "truth": "worse",
+      "confirmed": 0.0,
+      "checking": 0.785,
+      "reverted": 0.215
+    },
+    {
+      "people": 1500,
+      "truth": "better",
+      "confirmed": 0.265,
+      "checking": 0.735,
+      "reverted": 0.0
+    },
+    {
+      "people": 1500,
+      "truth": "no difference",
+      "confirmed": 0.02,
+      "checking": 0.91,
+      "reverted": 0.07
+    },
+    {
+      "people": 1500,
+      "truth": "worse",
+      "confirmed": 0.0,
+      "checking": 0.635,
+      "reverted": 0.365
+    },
+    {
+      "people": 5000,
+      "truth": "better",
+      "confirmed": 0.72,
+      "checking": 0.28,
+      "reverted": 0.0
+    },
+    {
+      "people": 5000,
+      "truth": "no difference",
+      "confirmed": 0.025,
+      "checking": 0.945,
+      "reverted": 0.03
+    },
+    {
+      "people": 5000,
+      "truth": "worse",
+      "confirmed": 0.0,
+      "checking": 0.08,
+      "reverted": 0.92
+    }
+  ],
+  "adoption_false_alarms": [
+    {
+      "people": 400,
+      "false_confirm": 0.0117,
+      "false_switch_back": 0.03525
+    },
+    {
+      "people": 1500,
+      "false_confirm": 0.01825,
+      "false_switch_back": 0.03105
+    },
+    {
+      "people": 5000,
+      "false_confirm": 0.02025,
+      "false_switch_back": 0.0253
+    }
+  ],
+  "end_to_end": {
+    "day5": {
+      "status": "running",
+      "headline": "Collecting outcomes \u2014 day 5 of 14",
+      "detail": "Not final yet: purchases are counted for 14 days after the send. So far variant B is +3.7 pts vs sending nothing (not a conclusion)."
+    },
+    "day15": {
+      "status": "winner",
+      "winner": "B",
+      "headline": "Variant B wins: +6.2 pts purchases vs sending nothing",
+      "detail": "95% interval +3.2 pts to +8.9 pts, adjusted p = 0.0000."
+    },
+    "arms": [
+      {
+        "arm": "control",
+        "n": 767,
+        "purchases": 57,
+        "rate": 0.07431551499348109
+      },
+      {
+        "arm": "A",
+        "n": 1624,
+        "purchases": 137,
+        "rate": 0.08435960591133004
+      },
+      {
+        "arm": "B",
+        "n": 1609,
+        "purchases": 219,
+        "rate": 0.13610938471100062
+      }
+    ]
+  }
+}

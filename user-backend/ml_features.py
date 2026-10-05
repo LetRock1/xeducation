@@ -2,9 +2,9 @@
 ml_features.py — THE single source of truth for model features.
 
 Used by:
-  * ml/generate_dataset.py   (to produce training data with these exact columns)
+  * ml/generate_dataset.py   (simulated leads: base lead model, next-best-action prior, starting history)
   * ml/train_model.py        (to engineer features before training)
-  * ml/retrain_from_live.py  (closed-loop retraining on real outcomes)
+  * user-backend/learning.py (the automatic learning loop)
   * user-backend/predict.py  (to engineer features at prediction time)
 
 Because training and serving import the SAME functions, the model can never
@@ -15,7 +15,9 @@ the training vocabulary to "Unknown"/"Other" before the model sees it.
 import numpy as np
 import pandas as pd
 
-FEATURE_VERSION = 4
+import settings
+
+FEATURE_VERSION = 6     # v6: base model on simulated leads + live layer learned by the learning loop
 
 # ── Vocabularies (what the website can actually produce) ────────────────────
 LEAD_ORIGINS = ["Landing Page Submission", "Lead Add Form", "API",
@@ -209,16 +211,15 @@ def to_model_frame(rows) -> pd.DataFrame:
     return engineer(df)[MODEL_COLUMNS]
 
 
-# ── Score → tier / persona (one definition used everywhere) ─────────────────
-TIERS = [(80, "Target Immediately"), (60, "Nurture via Email/WhatsApp"),
-         (40, "Marketing Campaign"), (0, "Low Priority")]
+# ── Score → tier / persona (one definition used everywhere; set in crm_settings.json) ──
+TIERS = settings.tiers()
 
 
 def tier_for(score: float) -> str:
     for cutoff, name in TIERS:
         if score >= cutoff:
             return name
-    return "Low Priority"
+    return TIERS[-1][1]
 
 
 def persona_for(score: float, is_customer: bool = False) -> str:
@@ -249,6 +250,7 @@ EXPLAIN_SIGNALS = [
     ("TotalVisits", "Returning visitor", 1),
     ("TotalTimeOnWebsite", "Time on site", 120),     # vs. a typical 2-minute visit
     ("CurrentOccupation", "Occupation", "Unknown"),
+    ("Specialization", "Specialization", "Unknown"),
     ("LeadSource", "Traffic source", "Direct Traffic"),
     ("DoNotEmail", "Opted out of email", 0),
     ("DoNotCall", "Opted out of calls", 0),

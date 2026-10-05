@@ -1,6 +1,7 @@
 import os
 from apscheduler.schedulers.background import BackgroundScheduler
 import database as db
+import settings
 from playbook import handle_trigger
 from outreach import send_tracked_email
 
@@ -18,20 +19,23 @@ def _send_tracked_email(user_id, lead_id, to_email, subject, body, course_slug=N
     return send_tracked_email(user_id, lead_id, to_email, subject, body, course_slug=course_slug)
 
 # ============================================================
-COOLDOWN_SESSION_HOURS = 6
-COOLDOWN_CART_HOURS = 12
-COOLDOWN_WISHLIST_HOURS = 24
+_COOL = settings.S["cooldown_hours"]
+COOLDOWN_SESSION_HOURS = _COOL["visit"]
+COOLDOWN_CART_HOURS = _COOL["cart"]
+COOLDOWN_WISHLIST_HOURS = _COOL["wishlist"]
 # Touchpoints that count for cooldowns. "signup" is not one: creating the CRM
 # contact at signup sends nothing, so it must not block the first follow-up.
 TOUCH_TRIGGERS = ("enquiry", "chat_callback", "cart_abandon", "checkout_abandon", "wishlist", "session_end")
 
 # ============================================================
-DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
-SESSION_INACTIVE_MINUTES = 1 if DEMO_MODE else 15
-CART_ABANDON_MINUTES = 1 if DEMO_MODE else 60
-WISHLIST_DELAY_MINUTES = 1 if DEMO_MODE else 30
-CHECKOUT_ABANDON_MINUTES = 1 if DEMO_MODE else 30
-COOLDOWN_CHECKOUT_HOURS = 12
+DEMO_MODE = settings.DEMO_MODE
+_MIN = settings.by_mode("automation_minutes")       # crm_settings.json: demo vs live timings
+SESSION_INACTIVE_MINUTES = _MIN["visit_ended"]
+CART_ABANDON_MINUTES = _MIN["cart_abandoned"]
+WISHLIST_DELAY_MINUTES = _MIN["wishlist"]
+CHECKOUT_ABANDON_MINUTES = _MIN["checkout_abandoned"]
+JOB_EVERY_MINUTES = _MIN["job_every"]
+COOLDOWN_CHECKOUT_HOURS = _COOL["checkout"]
 
 
 # ============================================================
@@ -131,6 +135,10 @@ def run_all_jobs():
 
 
 def start_scheduler():
-    scheduler.add_job(run_all_jobs, "interval", minutes=5)
+    import learning
+    scheduler.add_job(run_all_jobs, "interval", minutes=JOB_EVERY_MINUTES)
+    learn_every = int(settings.S["learning"]["check_every_minutes"][settings.MODE])
+    scheduler.add_job(learning.scheduled_job, "interval", minutes=learn_every)
     scheduler.start()
-    print("[SCHEDULER] All jobs started")
+    print(f"[SCHEDULER] Automations every {JOB_EVERY_MINUTES} min; learning loop checks every {learn_every} min "
+          f"(runs when {settings.S['learning']['min_new_outcomes']}+ new outcomes are known)")

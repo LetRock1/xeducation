@@ -306,6 +306,100 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_snap_user ON score_snapshots(user_id, created_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_events_user ON behaviour_events(user_id, event_type)")
 
+    # ── 18. EXPERIMENT ASSIGNMENTS (A/B tests and campaign holdouts) ──
+    # Every person in an A/B test or campaign audience, with the arm they were
+    # assigned to and the probability of that arm. The learning loop uses every
+    # assignment, with the next-best-action log, as a decision point (what the CRM
+    # did at that moment); the no-email arms ('control', 'holdout') got nothing.
+    c.execute("""CREATE TABLE IF NOT EXISTS experiment_assignments (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        experiment_type TEXT NOT NULL,          -- 'ab' | 'campaign'
+        experiment_id   INTEGER NOT NULL,
+        user_id         INTEGER REFERENCES users(id),
+        lead_id         INTEGER,
+        arm             TEXT NOT NULL,          -- 'control' | 'holdout' | 'send' | 'A' | 'B' | 'C'
+        probability     REAL NOT NULL,          -- chance of this arm under the assignment rule
+        features_json   TEXT,                   -- what the model knew at assignment time
+        tier            TEXT,
+        occupation      TEXT,
+        device          TEXT,
+        source          TEXT,
+        assigned_at     TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(experiment_type, experiment_id, user_id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_assign_exp ON experiment_assignments(experiment_type, experiment_id)")
+
+    # ── 19. LEARNING RUNS (the automatic learning loop's log) ──
+    c.execute("""CREATE TABLE IF NOT EXISTS learning_runs (
+        id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+        started_at               TEXT DEFAULT (datetime('now','localtime')),
+        finished_at              TEXT,
+        as_of                    TEXT,
+        reason                   TEXT,             -- scheduled | manual | history | cli
+        status                   TEXT,             -- done | skipped | error
+        outcomes_known           INTEGER,
+        new_outcomes             INTEGER,
+        random_slice             INTEGER,          -- control-group decision points with a known outcome (5% global control group)
+        random_slice_buyers      INTEGER,
+        lead_decision            TEXT,             -- swapped | kept | not_enough_data
+        lead_prob_better         REAL,
+        champion_true_logloss    REAL, challenger_true_logloss REAL, naive_true_logloss REAL,
+        champion_true_auc        REAL, challenger_true_auc     REAL, naive_true_auc     REAL,
+        champion_live_auc        REAL, challenger_live_auc     REAL, naive_live_auc     REAL,
+        challenger_live_logloss  REAL, naive_live_logloss      REAL,
+        naive_would_pick         INTEGER,          -- would 'best fit on live data' have chosen the naive model?
+        own_effect_share         REAL,             -- share of followed-up leads' buying chance caused by the follow-ups
+        learned_json             TEXT,             -- the live layer after the run (points per signal, slope, intercept)
+        nba_decision             TEXT,             -- swapped | kept | not_enough_data
+        nba_detail_json          TEXT,
+        lead_version_before      TEXT, lead_version_after TEXT,
+        nba_version_before       TEXT, nba_version_after  TEXT,
+        note                     TEXT,
+        simulated                INTEGER DEFAULT 0
+    )""")
+
+    # ── 20. PIPELINE BOARD: cards moved by hand (otherwise the stage follows the learner's behaviour) ──
+    c.execute("""CREATE TABLE IF NOT EXISTS pipeline_overrides (
+        user_id    INTEGER PRIMARY KEY REFERENCES users(id),
+        stage      TEXT NOT NULL,                 -- Lead | Engaged | MQL | SQL
+        note       TEXT,
+        moved_at   TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+
+    # ── 21. ADOPTED A/B WINNERS: the winning wording becomes the standard information email of its
+    #        audience; a small check group keeps getting the old email so the CRM keeps checking it ──
+    c.execute("""CREATE TABLE IF NOT EXISTS adopted_emails (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        ab_test_id    INTEGER,                    -- ab_tests.id in the marketing database
+        test_name     TEXT,
+        audience      TEXT,                       -- a tier name or 'All leads'
+        metric        TEXT,                       -- purchase | click
+        variant_key   TEXT,
+        variant_label TEXT,
+        subject       TEXT,
+        body          TEXT,
+        test_lift     REAL, test_lift_lo REAL, test_lift_hi REAL,
+        check_share   REAL,                       -- share of the audience that keeps the old email
+        status        TEXT DEFAULT 'active',      -- active | confirmed | reverted
+        adopted_at    TEXT,
+        decided_at    TEXT,
+        reason        TEXT,
+        check_json    TEXT,                       -- latest adopted-vs-old comparison
+        simulated     INTEGER DEFAULT 0
+    )""")
+
+    # ── 22. COPILOT: every question, which data tools answered it, and the answer ──
+    c.execute("""CREATE TABLE IF NOT EXISTS copilot_log (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        asked_at    TEXT DEFAULT (datetime('now','localtime')),
+        question    TEXT,
+        intent      TEXT,
+        tools_json  TEXT,
+        answer      TEXT,
+        drafts_json TEXT,
+        used_gemini INTEGER DEFAULT 0
+    )""")
+
     conn.commit()
 
     # ── Additive migrations for pre-existing DBs ─────────────────────
@@ -325,12 +419,34 @@ def init_db():
         "ALTER TABLE leads ADD COLUMN tips_json TEXT",
         "ALTER TABLE wishlist ADD COLUMN reminder_sent INTEGER DEFAULT 0",
         "ALTER TABLE user_sessions ADD COLUMN followed_up INTEGER DEFAULT 0",
+        "ALTER TABLE email_sends ADD COLUMN adoption_id INTEGER",
+        "ALTER TABLE email_sends ADD COLUMN adoption_arm TEXT",
     ):
         try:
             c.execute(col_sql)
             conn.commit()
         except sqlite3.OperationalError:
             pass  # column already exists
+
+    # ── Indexes for per-person look-ups (lead lists, lead pages, learning loop) ──
+    for idx_sql in (
+        "CREATE INDEX IF NOT EXISTS idx_leads_user ON leads(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_purchases_user ON purchases(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sessions_user ON user_sessions(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_emails_user ON email_sends(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_nba_user ON nba_decisions(user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_coupons_user ON coupons_issued(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_tasks_user ON sales_tasks(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_assign_user ON experiment_assignments(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_callbacks_user ON callback_requests(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_profiles_user ON user_profiles(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_history_user ON lead_score_history(user_id)",
+    ):
+        try:
+            c.execute(idx_sql)
+        except sqlite3.OperationalError:
+            pass  # table from an older version without that column
+    conn.commit()
 
     conn.close()
     print(f"[DB] Initialised -> {DB_PATH}")

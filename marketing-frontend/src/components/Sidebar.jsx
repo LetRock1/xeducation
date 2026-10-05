@@ -2,8 +2,12 @@ import { NavLink, useNavigate } from 'react-router-dom'
 
 const links = [
   { to:'/',          icon:'📊', label:'Dashboard'  },
+  { to:'/copilot',   icon:'💬', label:'Ask the CRM' },
+  { to:'/learning',  icon:'🔁', label:'Learning loop' },
   { to:'/actions',   icon:'⚡', label:"Today's actions" },
   { to:'/leads',     icon:'🎯', label:'Leads'       },
+  { to:'/pipeline',  icon:'🗂️', label:'Pipeline'    },
+  { to:'/journeys',  icon:'🧭', label:'Journeys'    },
   { to:'/callbacks', icon:'📞', label:'Callbacks'   },
   { to:'/campaigns', icon:'📅', label:'Campaigns'   },
   { to:'/ab-tests',  icon:'🧪', label:'A/B Tests'   },
@@ -20,9 +24,9 @@ export default function Sidebar() {
       <div className="px-6 py-6 border-b border-white/10">
         <div className="flex items-center gap-2 mb-1">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-accent to-gold flex items-center justify-center font-display font-black text-navy text-sm">X</div>
-          <span className="font-display font-bold text-white text-sm">Education</span>
+          <span className="font-display font-bold text-white text-sm">Education CRM</span>
         </div>
-        <p className="text-slate-500 text-xs">Marketing Intelligence</p>
+        <p className="text-slate-500 text-xs">Learns · tests · acts</p>
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1">

@@ -1,6 +1,6 @@
 @echo off
 REM ==========================================================================
-REM  X Education - one-click launcher (v2)
+REM  X Education CRM - start everything (stop-all.bat stops it)
 REM  Put this file in the project root (next to user-backend, marketing-backend,
 REM  user-frontend, marketing-frontend) and double-click it.
 REM ==========================================================================
@@ -20,7 +20,7 @@ set PYTHONIOENCODING=utf-8
 
 echo.
 echo ================================================
-echo    X EDUCATION - Revenue Intelligence Launcher
+echo    X EDUCATION CRM - starting
 echo ================================================
 echo Running from: %ROOT%
 echo.
@@ -79,20 +79,12 @@ pushd "%ROOT%"
 node tools\sync-catalog.mjs
 popd
 
-REM ---- Models: train once with THIS venv's scikit-learn ---------------------
+REM ---- Models and starting history: only what is missing ------------------
+REM  First start: trains the lead model and the next-best-action model (about 30 s)
+REM  and creates 6 simulated months of history (about 5-10 minutes, once).
 pushd "%ROOT%"
-if not exist "user-backend\ml_models\lead_model.pkl" (
-  echo.
-  echo ==== Training the lead-scoring model - first run only, about 30 s ====
-  "user-backend\venv\Scripts\python.exe" ml\train_model.py
-  if errorlevel 1 echo [WARN] Lead model training failed - the backend will use fallback scoring.
-)
-if not exist "user-backend\ml_models\nba_model.pkl" (
-  echo.
-  echo ==== Training the next-best-action model - first run only, about 20 s ====
-  "user-backend\venv\Scripts\python.exe" ml\train_uplift.py
-  if errorlevel 1 echo [WARN] NBA model training failed - the backend will use its built-in prior.
-)
+"user-backend\venv\Scripts\python.exe" ml\first_run.py
+if errorlevel 1 echo [WARN] First-run setup reported a problem - see the lines above.
 popd
 
 REM ---- Launch -------------------------------------------------------------

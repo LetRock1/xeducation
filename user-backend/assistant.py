@@ -22,6 +22,7 @@ import os
 import re
 
 import catalog
+import gemini
 from recommendations import get_recommendations
 
 _FAQ_PATH = os.path.join(os.path.dirname(__file__), "faq.json")
@@ -179,18 +180,15 @@ def answer(text, page_slug=None, profile=None, user=None, purchased_slugs=()):
 
 def _llm_answer(text, course):
     """Optional: Gemini answers questions the rules don't cover, using catalogue text only."""
-    if not os.getenv("GEMINI_API_KEY"):
+    if not gemini.enabled():
         return None
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        model = genai.GenerativeModel(os.getenv("GEMINI_MODEL", "gemini-1.5-flash"))
         context = json.dumps(course or catalog.all_courses()[:8], ensure_ascii=False)[:6000]
         faq = json.dumps(_faq(), ensure_ascii=False)
         prompt = (f"You are X Education's website assistant. Answer in at most 3 sentences using ONLY this "
                   f"catalogue: {context} and these policies: {faq}. If the answer isn't there, say you don't "
                   f"know and offer a callback. Question: {text}")
-        return model.generate_content(prompt).text.strip()
+        return gemini.generate(prompt).strip()
     except Exception as e:
         print(f"[ASSISTANT] Gemini fallback failed: {e}")
         return None

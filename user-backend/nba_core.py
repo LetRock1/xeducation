@@ -28,7 +28,7 @@ import pandas as pd
 # ── The actions the system can take ───────────────────────────────────────────
 # cost_inr = cost of performing the action (advisor time, messaging), charged
 # whether or not the person buys. discount = fraction of price given up IF they buy.
-ACTIONS = {
+_DEFAULT_ACTIONS = {
     "none":            {"label": "Do nothing for now", "channel": None, "discount": 0.00, "cost_inr": 0},
     "email_info":      {"label": "Send an information email", "channel": "email", "discount": 0.00, "cost_inr": 2},
     "email_coupon_10": {"label": "Send email with 10% coupon", "channel": "email", "discount": 0.10, "cost_inr": 2},
@@ -36,6 +36,26 @@ ACTIONS = {
     "call":            {"label": "Advisor phone call", "channel": "call", "discount": 0.00, "cost_inr": 150},
     "whatsapp":        {"label": "WhatsApp message", "channel": "whatsapp", "discount": 0.00, "cost_inr": 5},
 }
+
+
+def _actions_from_settings():
+    """Labels, costs and discounts come from crm_settings.json; the set of actions is fixed
+    (the uplift model is trained on exactly these)."""
+    try:
+        import settings
+        conf = settings.S.get("actions", {})
+    except Exception:
+        conf = {}
+    out = {}
+    for key, d in _DEFAULT_ACTIONS.items():
+        c = conf.get(key, {})
+        out[key] = {"label": c.get("label", d["label"]), "channel": d["channel"],
+                    "discount": float(c.get("discount", d["discount"])),
+                    "cost_inr": float(c.get("cost", d["cost_inr"]))}
+    return out
+
+
+ACTIONS = _actions_from_settings()
 ACTION_LIST = list(ACTIONS)
 TREATMENTS = [a for a in ACTION_LIST if a != "none"]
 
@@ -110,7 +130,7 @@ class FlexibleSLearner:
     with no hand-designed context. It can pick up effects the interpretable model cannot see (hidden,
     non-linear drivers) but needs more data and cannot be read as per-action effects. The robustness
     study (ml/experiments/nba_robustness.py) shows each family winning in different worlds, so
-    ml/retrain_nba_from_live.py keeps whichever earns more on held-out REAL decisions."""
+    the learning loop (learning.py) keeps whichever earns more on held-out REAL decisions."""
     kind = "flexible_gbm"
 
     def __init__(self, random_state=0):

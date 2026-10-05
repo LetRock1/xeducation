@@ -41,6 +41,32 @@ def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 
 
+OCC_EFFECT = {"Working Professional": 0.55, "Businessman": 0.35, "Student": -0.15,
+              "Unemployed": -0.45, "Housewife": -0.55, "Other": 0.0, "Unknown": -0.2}
+
+
+def true_logit(b, intent, luck):
+    """The simulator's ground truth: log-odds that a lead buys, from their hidden intent, profile
+    and behaviour. Used by generate() and, step by step, by the history generator
+    (ml/generate_history.py). Keys of b: occ, visits, time_on_site, video, pricing, testimonial,
+    brochure, chat, webinar, wishlist, cart, checkout, enquiry, opens, whatsapp, dne, dnc."""
+    occ_effect = pd.Series(np.atleast_1d(b["occ"])).map(OCC_EFFECT).fillna(0.0).to_numpy()
+    return (
+        -2.70
+        + 0.95 * np.asarray(intent)               # the part behaviour only hints at
+        + occ_effect
+        + 0.25 * np.log(np.asarray(b["visits"], dtype=float))
+        + 0.18 * np.log1p(np.asarray(b["time_on_site"], dtype=float) / 60)
+        + 0.30 * np.asarray(b["video"]) + 0.35 * np.asarray(b["pricing"]) + 0.20 * np.asarray(b["testimonial"])
+        + 0.45 * np.asarray(b["brochure"]) + 0.40 * np.asarray(b["chat"]) + 0.60 * np.asarray(b["webinar"])
+        + 0.30 * np.asarray(b["wishlist"]) + 0.75 * np.asarray(b["cart"]) + 0.95 * np.asarray(b["checkout"])
+        + 0.85 * np.asarray(b["enquiry"])
+        + 0.10 * np.minimum(np.asarray(b["opens"]), 4) + 0.25 * np.asarray(b["whatsapp"])
+        - 0.45 * np.asarray(b["dne"]) - 0.25 * np.asarray(b["dnc"])
+        + np.asarray(luck)
+    )
+
+
 def generate(n: int, seed: int = 42, return_truth: bool = False) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
 
@@ -114,23 +140,11 @@ def generate(n: int, seed: int = 42, return_truth: bool = False) -> pd.DataFrame
     opens = opens.clip(0, 10)
 
     # ── D. Outcome ──────────────────────────────────────────────────────
-    occ_effect = pd.Series(occ).map({
-        "Working Professional": 0.55, "Businessman": 0.35, "Student": -0.15,
-        "Unemployed": -0.45, "Housewife": -0.55, "Other": 0.0, "Unknown": -0.2,
-    }).to_numpy()
-    logit = (
-        -2.70
-        + 0.95 * intent                       # the part behaviour only hints at
-        + occ_effect
-        + 0.25 * np.log(visits)
-        + 0.18 * np.log1p(time_on_site / 60)
-        + 0.30 * video + 0.35 * pricing + 0.20 * testimonial
-        + 0.45 * brochure + 0.40 * chat + 0.60 * webinar
-        + 0.30 * wishlist + 0.75 * cart + 0.95 * checkout + 0.85 * enquiry
-        + 0.10 * np.minimum(opens, 4) + 0.25 * whatsapp
-        - 0.45 * dne - 0.25 * dnc
-        + rng.normal(0, 0.45, n)              # luck: timing, budget, mood of the call
-    )
+    luck = rng.normal(0, 0.45, n)             # timing, budget, mood of the call
+    logit = true_logit(dict(occ=occ, visits=visits, time_on_site=time_on_site, video=video, pricing=pricing,
+                            testimonial=testimonial, brochure=brochure, chat=chat, webinar=webinar,
+                            wishlist=wishlist, cart=cart, checkout=checkout, enquiry=enquiry, opens=opens,
+                            whatsapp=whatsapp, dne=dne, dnc=dnc), intent, luck)
     p_true = sigmoid(logit)
     converted = (rng.random(n) < p_true).astype(int)
 

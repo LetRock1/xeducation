@@ -1,10 +1,11 @@
 """
-predict.py — Lead scoring engine (v4)
+predict.py — Lead scoring engine (v6)
 
-Loads ONE file: ml_models/lead_model.pkl (built by ml/train_model.py).
-The pipeline inside it already contains the preprocessing, and features are
-engineered with ml_features.py — the same code used at training time — so
-training and serving can no longer drift apart.
+Loads ONE file: ml_models/lead_model.pkl. The score has two parts (see lead_model.py):
+a base model over every signal the website records (ml/train_model.py) and a live layer
+learned from this CRM's own outcomes by the learning loop (learning.py). Features are
+engineered with ml_features.py — the same code used at training time — so training and
+serving cannot drift apart.
 
 What changed vs the old version:
   * No KMeans/PCA persona: persona now comes from the calibrated score, so a
@@ -24,8 +25,10 @@ import os
 import threading
 
 import joblib
+import numpy as np
 import pandas as pd
 
+import lead_model as LM
 import ml_features as F
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "ml_models", "lead_model.pkl")
@@ -42,7 +45,7 @@ def _load():
     except OSError:
         if not _state["warned"]:
             print(f"[ML] WARNING: {MODEL_PATH} not found — using fallback scoring.")
-            print("[ML]          Run train-model.bat (or ml/train_model.py) to create it.")
+            print("[ML]          start-all.bat creates it on first start (or run ml/train_model.py).")
             _state["warned"] = True
         _state["bundle"] = None
         return None
@@ -53,13 +56,13 @@ def _load():
             return _state["bundle"]
         try:
             bundle = joblib.load(MODEL_PATH)
-            if bundle.get("feature_version") != F.FEATURE_VERSION:
+            if bundle.get("feature_version") != F.FEATURE_VERSION or "starter" not in bundle:
                 raise ValueError(f"model feature_version {bundle.get('feature_version')} "
-                                 f"!= code feature_version {F.FEATURE_VERSION}; retrain the model")
+                                 f"!= code feature_version {F.FEATURE_VERSION}; delete user-backend/ml_models and run start-all.bat")
             import sklearn
             if bundle.get("sklearn_version") != sklearn.__version__:
                 print(f"[ML] WARNING: model trained with scikit-learn {bundle.get('sklearn_version')}, "
-                      f"running {sklearn.__version__}. Re-run train-model.bat if scores look wrong.")
+                      f"running {sklearn.__version__}. Delete user-backend/ml_models and run start-all.bat if scores look wrong.")
             _state.update(bundle=bundle, mtime=mtime, warned=False)
             print(f"[ML] Loaded lead model {bundle['version']} ({bundle['model_type']}, "
                   f"AUC {bundle['metrics'].get('roc_auc')}, sklearn {bundle['sklearn_version']})")
@@ -73,7 +76,15 @@ def model_info() -> dict:
     b = _load()
     if not b:
         return {"loaded": False, "version": "fallback"}
-    return {"loaded": True, **{k: v for k, v in b.items() if k != "pipeline"}}
+    info = {"loaded": True, **{k: v for k, v in b.items() if k not in ("starter", "pipeline")}}
+    info["learned_signals"] = LM.learned_points(b)
+    return info
+
+
+def reload():
+    """Forget the cached model so the next score reads the file again (used after retraining in-process)."""
+    with _lock:
+        _state.update(bundle=None, mtime=None)
 
 
 def _legacy_keys(raw: dict) -> dict:
@@ -106,7 +117,7 @@ def _probs(rows: list) -> list:
     b = _load()
     if b is None:
         return list(_fallback_probs(frame))
-    return list(b["pipeline"].predict_proba(frame)[:, 1])
+    return list(LM.predict_proba(b, frame))
 
 
 def _explain(clean: dict, prob: float) -> list:
@@ -121,6 +132,8 @@ def _explain(clean: dict, prob: float) -> list:
         v[feat] = absent
         if feat == "TotalVisits":
             v["TotalTimeOnWebsite"] = clean["TotalTimeOnWebsite"] / max(clean["TotalVisits"], 1)
+        if feat == "EnquirySubmitted":            # the enquiry is also what makes the origin a lead form
+            v["LeadOrigin"] = "Landing Page Submission"
         variants.append(v)
         meta.append((feat, label))
     if not variants:
@@ -138,7 +151,7 @@ def _explain(clean: dict, prob: float) -> list:
             detail = f"{int(value)} visits"
         elif feat == "EmailOpenedCount":
             detail = f"{int(value)} email open(s)/click(s)"
-        elif feat in ("CurrentOccupation", "LeadSource"):
+        elif feat in ("CurrentOccupation", "LeadSource", "Specialization"):
             detail = str(value)
         else:
             detail = "Yes"

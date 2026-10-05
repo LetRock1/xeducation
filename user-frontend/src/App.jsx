@@ -20,6 +20,7 @@ import ThankYou             from './pages/ThankYou'
 import ForgotPassword       from './pages/ForgotPassword'
 import Settings             from './pages/Settings'
 import Brochure             from './pages/Brochure'
+import Privacy              from './pages/Privacy'
 
 captureSource()   // remember utm_source / referrer of the landing page
 
@@ -68,6 +69,7 @@ function AppShell() {
         <Route path="/checkout"         element={<Protected><Checkout /></Protected>} />
         <Route path="/enquiry/:slug"    element={<Protected><Enquiry /></Protected>} />
         <Route path="/thank-you"        element={<ThankYou />} />
+        <Route path="/privacy"          element={<Privacy />} />
       </Routes>
       <Footer />
       <ChatWidget />

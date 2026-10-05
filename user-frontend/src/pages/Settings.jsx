@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { completeProfile, updatePrefs, changePassword } from '../utils/api'
+import { useNavigate } from 'react-router-dom'
+import { completeProfile, updatePrefs, changePassword, deleteAccount } from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 import { OCCUPATIONS, SPECIALIZATIONS, AGE_BRACKETS, CITIES, COUNTRIES, HOW_HEARD } from '../data/profileOptions'
 
@@ -22,7 +23,8 @@ function Toggle({ checked, onChange, label, hint }) {
 }
 
 export default function Settings() {
-  const { user, profile, refreshProfile } = useAuth()
+  const { user, profile, refreshProfile, logout } = useAuth()
+  const navigate = useNavigate()
   const [form, setForm] = useState({ current_occupation: '', specialization: '', age_bracket: '', city: '', country: 'India', how_did_you_hear: '' })
   const [prefs, setPrefs] = useState({ email: true, calls: true, whatsapp: false, phone: '' })
   const [pw, setPw] = useState({ current_password: '', new_password: '', confirm: '' })
@@ -66,6 +68,15 @@ export default function Settings() {
   }
 
   const sel = 'inp'
+  async function removeAccount() {
+    if (!window.confirm('Delete your account and all your data? This cannot be undone.')) return
+    try {
+      await deleteAccount()
+      logout()
+      navigate('/')
+    } catch (e) { note('del', '⚠️ ' + (e.response?.data?.detail || 'Could not delete the account.')) }
+  }
+
   return (
     <main className="min-h-screen bg-slate-50 pt-20 pb-16">
       <div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
@@ -123,6 +134,15 @@ export default function Settings() {
           <Notice msg={msgs.pw} />
           <button className="btn-primary">Change password</button>
         </form>
+
+        <div className="bg-white border border-red-200 rounded-2xl p-6 space-y-3">
+          <h2 className="font-display font-bold text-navy">Delete my account</h2>
+          <p className="text-slate-500 text-sm">Deletes your account and everything X Education stores about you: your profile, browsing
+            activity, emails, offers, enquiries and purchase records. This cannot be undone.</p>
+          <Notice msg={msgs.del} />
+          <button type="button" onClick={removeAccount}
+            className="px-4 py-2 rounded-xl text-sm font-semibold text-red-600 border border-red-300 hover:bg-red-50">Delete my account and data</button>
+        </div>
       </div>
     </main>
   )

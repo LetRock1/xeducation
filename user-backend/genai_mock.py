@@ -20,6 +20,7 @@ import os
 from datetime import datetime
 
 import catalog
+import gemini
 
 YEAR = datetime.now().year
 COUPON_VALID_HOURS = 72
@@ -174,7 +175,7 @@ def generate_content(name: str, occupation: str, specialization: str, course: st
         pct = 20
     code = coupon_code_for(pct, returning=past_purchases > 0)
 
-    if os.getenv("GEMINI_API_KEY"):
+    if gemini.enabled():
         try:
             return generate_content_ai(first, occupation, specialization, f, action, trigger,
                                        lead_score, past_purchases, code, pct)
@@ -190,10 +191,6 @@ def generate_content(name: str, occupation: str, specialization: str, course: st
 def generate_content_ai(first, occupation, specialization, f, action, trigger, lead_score,
                         past_purchases, code, pct) -> dict:
     """Gemini writes the copy from the catalogue facts only. Raises on any failure."""
-    import google.generativeai as genai
-
-    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-    model = genai.GenerativeModel(os.getenv("GEMINI_MODEL", "gemini-1.5-flash"))
     facts = _course_block(f) or f["title"]
     offer = (f"Include the coupon code {code} ({pct}% off, valid {COUPON_VALID_HOURS} hours) once."
              if code else "Do not offer any discount.")
@@ -211,8 +208,7 @@ Rules:
 - Warm, specific, under 160 words. Mention the course by name and why we're writing now.
 
 Reply with ONLY JSON: {{"email_subject":"...","email_body":"...","whatsapp_message":"...","call_script":"..."}}"""
-    resp = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
-    content = _json.loads(resp.text)
+    content = _json.loads(gemini.generate(prompt, json_mode=True))
     for key in ("email_subject", "email_body", "whatsapp_message"):
         if not content.get(key):
             raise ValueError(f"Gemini response missing {key}")

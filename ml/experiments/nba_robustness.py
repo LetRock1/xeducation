@@ -35,7 +35,7 @@
                    weighting (no access to the truth), keep the better family
    the six fixed policies of train_uplift.py, and the oracle (knows the truth)
 
- Run (after train-model.bat):  python ml/experiments/nba_robustness.py   (~15 min)
+ Run (after the first start-all.bat):  python ml/experiments/nba_robustness.py   (~15 min)
  Writes ml/results/nba_robustness.{json,md} (+ figure if matplotlib is installed)
 =================================================================
 """
@@ -168,7 +168,7 @@ def randomized_campaign(info, truth, seed):
 
 
 def snips_profit(model, frame, base, blocked, price, actions, props, y):
-    """The closed loop's off-policy estimate (same rule as retrain_nba_from_live.snips_value)."""
+    """The closed loop's off-policy estimate (same rule as learning.retrain_nba)."""
     greedy = U.greedy_policy(U.predict_all(model, frame, base), price, blocked, capacity=1.0)
     w = (greedy == actions) / props
     disc = np.array([N.ACTIONS[a]["discount"] for a in actions])
@@ -242,7 +242,7 @@ def run_world(name, effects_fn, tr, te, fixed, seed, sizes=None, noise_sd=S.EFFE
 def main():
     t0 = time.time()
     if not os.path.exists(T.MODEL_PATH):
-        raise SystemExit("Train the lead model first (train-model.bat or python ml/train_model.py).")
+        raise SystemExit("Train the lead model first (start-all.bat, or python ml/train_model.py).")
     os.makedirs(RESULTS, exist_ok=True)
     print("Generating leads and scoring them with the live lead model ...")
     tr = world_info(G.generate(N_TRAIN, seed=2024, return_truth=True))

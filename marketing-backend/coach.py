@@ -12,6 +12,7 @@ import os
 import re
 
 import catalog
+import gemini
 
 UNVERIFIABLE = [
     (r"\b\d+\s?%\s?(salary|hike|increase|more|higher)", "Salary / hike percentages can't be backed up — remove them or cite a source."),
@@ -73,11 +74,8 @@ def rule_based(subject, body, name, tier, course_slug=None):
 
 
 def improve(subject, body, name, tier, course_slug=None, occupation=None):
-    if os.getenv("GEMINI_API_KEY"):
+    if gemini.enabled():
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-            model = genai.GenerativeModel(os.getenv("GEMINI_MODEL", "gemini-1.5-flash"))
             f = catalog.facts(course_slug) if course_slug else None
             prompt = f"""Improve this marketing email for clarity, warmth and a clear call to action.
 Recipient: {_first(name)}, {occupation or 'a learner'}; lead tier: {tier}.
@@ -88,8 +86,7 @@ Draft subject: {subject}
 Draft body:
 {body}
 Reply with ONLY JSON: {{"subject":"...","body":"...","notes":["what you changed", "..."]}}"""
-            out = json.loads(model.generate_content(
-                prompt, generation_config={"response_mime_type": "application/json"}).text)
+            out = json.loads(gemini.generate(prompt, json_mode=True))
             _, _, checks = rule_based(out["subject"], out["body"], name, tier, course_slug)
             notes = list(out.get("notes") or []) + [c for c in checks if not c.startswith("Looks good")]
             return {"improved_subject": out["subject"], "improved_body": out["body"],

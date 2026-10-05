@@ -10,6 +10,10 @@ import Coupons   from './pages/Coupons'
 import QnAPage   from './pages/QnAPage'
 import Callbacks from './pages/Callbacks'
 import Actions   from './pages/Actions'
+import Learning  from './pages/Learning'
+import Journeys  from './pages/Journeys'
+import Pipeline  from './pages/Pipeline'
+import Copilot   from './pages/Copilot'
 import Sidebar   from './components/Sidebar'
 
 function Protected({ children }) {
@@ -39,6 +43,10 @@ export default function App() {
         <Route path="/qna"        element={<Protected><QnAPage /></Protected>} />
         <Route path="/callbacks"  element={<Protected><Callbacks /></Protected>} />
         <Route path="/actions"    element={<Protected><Actions /></Protected>} />
+        <Route path="/learning"   element={<Protected><Learning /></Protected>} />
+        <Route path="/journeys"   element={<Protected><Journeys /></Protected>} />
+        <Route path="/pipeline"   element={<Protected><Pipeline /></Protected>} />
+        <Route path="/copilot"    element={<Protected><Copilot /></Protected>} />
       </Routes>
     </BrowserRouter>
   )

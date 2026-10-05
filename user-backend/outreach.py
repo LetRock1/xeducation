@@ -23,7 +23,7 @@ def course_url(slug=None):
 
 
 def send_tracked_email(user_id, lead_id, to_email, subject, body, course_slug=None,
-                       cta_label="View Course", campaign_name=None):
+                       cta_label="View Course", campaign_name=None, adoption=None):
     profile = db.get_profile(user_id) or {}
     if profile.get("do_not_email") == "Yes":
         print(f"[EMAIL] skipped {to_email}: opted out of email")
@@ -32,6 +32,8 @@ def send_tracked_email(user_id, lead_id, to_email, subject, body, course_slug=No
     db.insert_email_send(token, user_id, lead_id=lead_id, subject=subject, body=body)
     if campaign_name:
         db.execute("UPDATE email_sends SET campaign_name=? WHERE token=?", (campaign_name, token))
+    if adoption:                                   # (adoption id, 'adopted' | 'check'): see adopted.py
+        db.execute("UPDATE email_sends SET adoption_id=?, adoption_arm=? WHERE token=?", (adoption[0], adoption[1], token))
     click_url = f"{MKT_BASE_URL}/api/mkt/track/click/{token}?to={quote(course_url(course_slug), safe='')}"
     unsubscribe_url = f"{MKT_BASE_URL}/api/mkt/unsubscribe/{token}"
     return send_marketing_email(to_email, subject, body, cta_url=click_url, cta_label=cta_label,

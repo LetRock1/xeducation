@@ -36,7 +36,7 @@ export default function Footer() {
       </div>
       <div className="border-t border-white/10 px-6 py-5 flex flex-col md:flex-row items-center justify-between gap-3 text-xs text-slate-600">
         <p>© {new Date().getFullYear()} X Education. All rights reserved.</p>
-        <p>Privacy Policy · Terms of Use · Cookie Policy</p>
+        <p><Link to="/privacy" className="hover:text-white">Privacy notice</Link> · A student project: payments are simulated</p>
       </div>
     </footer>
   )

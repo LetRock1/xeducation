@@ -83,10 +83,10 @@ export default function Dashboard() {
 
       {stats.demo_users > 0 && (
         <div className="card p-4 mb-6 text-xs text-slate-400 border-sky-accent/30">
-          Includes <span className="text-white font-semibold">{stats.demo_users} simulated demo learners</span> (emails ending
-          @demo.xeducation.test, marked “simulated” in Leads). Their behaviour comes from the dataset generator and their
-          purchases from the simulator, so the numbers below show how the system works, not real customer results.
-          Remove them with <span className="font-mono">remove-demo-data.bat</span>.
+          Includes the starting history: <span className="text-white font-semibold">{stats.demo_users} simulated learners</span> over
+          six months (emails ending @demo.xeducation.test, marked “simulated” in Leads). Their behaviour and purchases come from
+          the simulator, so these numbers show how the system works, not real customer results; real sign-ups are added on top.
+          To delete it: <span className="font-mono">python ml/generate_history.py --remove</span>.
         </div>
       )}
 
@@ -140,8 +140,8 @@ export default function Dashboard() {
             <h2 className="font-display text-lg font-bold text-white">Model health</h2>
             <p className="text-slate-500 text-xs">
               {health.model
-                ? `${health.model.version} · ${health.model.model_type?.replace('_',' ')} · AUC ${health.model.metrics?.roc_auc} · trained on ${health.model.trained_on?.synthetic_rows?.toLocaleString() || 0} synthetic + ${health.model.trained_on?.real_rows || 0} real leads`
-                : 'No trained model found — run train-model.bat'}
+                ? `${health.model.version} · base model: ${health.model.model_type?.replace('_',' ')} (AUC ${health.model.metrics?.roc_auc} on held-out simulated leads) · live layer learned from ${(health.model.trained_on?.history_outcomes || 0).toLocaleString()} outcomes of this CRM`
+                : 'No trained model yet — start-all.bat trains it on first start'}
             </p>
           </div>
           {health.by_tier.length === 0 ? (

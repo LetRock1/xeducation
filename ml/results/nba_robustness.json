@@ -277,7 +277,7 @@
       "selection": {
         "picked": "Next-best-action (ours, interpretable)",
         "snips_profit_per_lead": {
-          "Next-best-action (ours, interpretable)": 16745.444378188567,
+          "Next-best-action (ours, interpretable)": 16745.444378188564,
           "Next-best-action (flexible GBM)": 16207.192976662265
         }
       },
@@ -539,8 +539,8 @@
       "selection": {
         "picked": "Next-best-action (flexible GBM)",
         "snips_profit_per_lead": {
-          "Next-best-action (ours, interpretable)": 16302.407050636593,
-          "Next-best-action (flexible GBM)": 17451.17505151475
+          "Next-best-action (ours, interpretable)": 16302.407050636597,
+          "Next-best-action (flexible GBM)": 17451.175051514754
         }
       },
       "summary": {
@@ -663,8 +663,8 @@
       "selection": {
         "picked": "Next-best-action (flexible GBM)",
         "snips_profit_per_lead": {
-          "Next-best-action (ours, interpretable)": 17880.670743518705,
-          "Next-best-action (flexible GBM)": 18011.650875443265
+          "Next-best-action (ours, interpretable)": 17880.67074351871,
+          "Next-best-action (flexible GBM)": 18011.650875443258
         }
       },
       "summary": {
@@ -787,7 +787,7 @@
       "selection": {
         "picked": "Next-best-action (flexible GBM)",
         "snips_profit_per_lead": {
-          "Next-best-action (ours, interpretable)": 19028.967141054094,
+          "Next-best-action (ours, interpretable)": 19028.967141054098,
           "Next-best-action (flexible GBM)": 19845.755627292092
         }
       },
@@ -911,7 +911,7 @@
       "selection": {
         "picked": "Next-best-action (ours, interpretable)",
         "snips_profit_per_lead": {
-          "Next-best-action (ours, interpretable)": 22798.919668960552,
+          "Next-best-action (ours, interpretable)": 22798.919668960556,
           "Next-best-action (flexible GBM)": 22558.209802722475
         }
       },
@@ -1779,7 +1779,7 @@
       "selection": {
         "picked": "Next-best-action (flexible GBM)",
         "snips_profit_per_lead": {
-          "Next-best-action (ours, interpretable)": 20401.81597980199,
+          "Next-best-action (ours, interpretable)": 20401.815979801988,
           "Next-best-action (flexible GBM)": 21006.22999426201
         }
       },
@@ -1904,7 +1904,7 @@
         "picked": "Next-best-action (ours, interpretable)",
         "snips_profit_per_lead": {
           "Next-best-action (ours, interpretable)": 22193.603785474763,
-          "Next-best-action (flexible GBM)": 22088.91821515619
+          "Next-best-action (flexible GBM)": 22088.918215156194
         }
       },
       "summary": {
@@ -2027,7 +2027,7 @@
       "selection": {
         "picked": "Next-best-action (ours, interpretable)",
         "snips_profit_per_lead": {
-          "Next-best-action (ours, interpretable)": 18774.52731115685,
+          "Next-best-action (ours, interpretable)": 18774.527311156853,
           "Next-best-action (flexible GBM)": 18652.044848860147
         }
       },
@@ -2523,7 +2523,7 @@
       "selection": {
         "picked": "Next-best-action (ours, interpretable)",
         "snips_profit_per_lead": {
-          "Next-best-action (ours, interpretable)": 18891.391528545122,
+          "Next-best-action (ours, interpretable)": 18891.39152854512,
           "Next-best-action (flexible GBM)": 18526.23818359375
         }
       },
@@ -3020,7 +3020,7 @@
         "picked": "Next-best-action (ours, interpretable)",
         "snips_profit_per_lead": {
           "Next-best-action (ours, interpretable)": 17985.30085731375,
-          "Next-best-action (flexible GBM)": 17894.85556748535
+          "Next-best-action (flexible GBM)": 17894.855567485352
         }
       },
       "summary": {
@@ -3041,5 +3041,5 @@
       }
     }
   },
-  "runtime_s": 936.9
+  "runtime_s": 734.7
 }

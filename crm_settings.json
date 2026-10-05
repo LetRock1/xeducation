@@ -1,0 +1,83 @@
+{
+  "_about": "Business rules of X Education CRM, in one place. Both backends and the ML scripts read this file. Restart the servers (stop-all.bat, start-all.bat) after editing. Action keys are fixed (the models know them); their labels, costs and discounts can be changed.",
+
+  "business": {
+    "name": "X Education",
+    "crm_name": "X Education CRM",
+    "currency": "INR",
+    "currency_symbol": "₹"
+  },
+
+  "tiers": [
+    {"min_score": 80, "name": "Target Immediately"},
+    {"min_score": 60, "name": "Nurture via Email/WhatsApp"},
+    {"min_score": 40, "name": "Marketing Campaign"},
+    {"min_score": 0,  "name": "Low Priority"}
+  ],
+
+  "lifecycle_stages": {
+    "_about": "Standard CRM lifecycle (HubSpot/Salesforce style), worked out from what the learner did.",
+    "Lead":     "signed up",
+    "Engaged":  "watched a video, read the brochure or testimonials, joined a webinar, or came back for a 2nd visit",
+    "MQL":      "marketing-qualified: looked at pricing, wishlisted a course or used the chat",
+    "SQL":      "sales-qualified: sent an enquiry, added to cart or started checkout",
+    "Customer": "bought a course"
+  },
+
+  "actions": {
+    "none":            {"label": "Do nothing for now",         "channel": null,       "discount": 0.00, "cost": 0},
+    "email_info":      {"label": "Send an information email",  "channel": "email",    "discount": 0.00, "cost": 2},
+    "email_coupon_10": {"label": "Send email with 10% coupon", "channel": "email",    "discount": 0.10, "cost": 2},
+    "email_coupon_20": {"label": "Send email with 20% coupon", "channel": "email",    "discount": 0.20, "cost": 2},
+    "call":            {"label": "Advisor phone call",         "channel": "call",     "discount": 0.00, "cost": 150},
+    "whatsapp":        {"label": "WhatsApp message",           "channel": "whatsapp", "discount": 0.00, "cost": 5}
+  },
+  "daily_call_capacity": 20,
+  "exploration_rate": 0.15,
+  "outcome_window_days": 14,
+  "coupon_valid_hours": 72,
+
+  "automation_minutes": {
+    "_about": "How long after the event a follow-up is considered, and how often the automation job runs.",
+    "demo": {"job_every": 1, "visit_ended": 1, "cart_abandoned": 1, "checkout_abandoned": 1, "wishlist": 1},
+    "live": {"job_every": 5, "visit_ended": 15, "cart_abandoned": 60, "checkout_abandoned": 30, "wishlist": 30}
+  },
+  "cooldown_hours": {"visit": 6, "cart": 12, "checkout": 12, "wishlist": 24},
+  "decay_inactive_minutes": {"demo": 10, "live": 10080},
+
+  "learning": {
+    "_about": "The automatic learning loop. A new model replaces the old one only if it predicts the untouched control group (global_control) better in at least swap_confidence of the bootstrap resamples.",
+    "check_every_minutes": {"demo": 5, "live": 60},
+    "min_new_outcomes": 30,
+    "swap_confidence": 0.90,
+    "ridge": 2.0,
+    "bootstrap_resamples": 300
+  },
+
+  "ab_testing": {
+    "control_share": 0.20,
+    "alpha": 0.05,
+    "power": 0.80,
+    "min_detectable_effect": 0.05,
+    "outcome_window_days": 14,
+    "max_variants": 3,
+    "min_per_segment_arm": 30,
+    "auto_adopt": true,
+    "adoption_check_share": 0.10,
+    "_auto_adopt": "When a test is final and an email (without a discount) clearly won, it becomes the standard information email for that audience. adoption_check_share of the audience keeps the old email, so the CRM keeps checking that the winner still wins, and switches back by itself if it does not."
+  },
+
+  "campaigns": {"holdout_share": 0.10},
+
+  "global_control": {
+    "_about": "A fixed random share of leads that never gets automatic follow-ups (no next-best-action steps, campaigns or A/B emails). It measures the CRM's total impact and is the learning loop's honest check. Standard practice (e.g. Braze global control group, 1-15%).",
+    "share": 0.05
+  },
+
+  "starting_history": {
+    "_about": "On the first start, start-all.bat creates 6 simulated months of learners (marked 'simulated') so the dashboards and the learning loop have history. Delete it with: python ml/generate_history.py --remove",
+    "create_on_first_start": true,
+    "learners": 2000,
+    "days": 180
+  }
+}

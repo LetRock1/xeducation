@@ -1,0 +1,67 @@
+{
+  "repeats": 20,
+  "exploration": 0.15,
+  "mean": {
+    "naive": {
+      "overstatement_pct": 39.55359,
+      "honest_auc": 0.63732,
+      "apparent_auc": 0.68639,
+      "honest_logloss": 0.32849,
+      "live_logloss": 0.37364
+    },
+    "ours": {
+      "overstatement_pct": 10.22864,
+      "honest_auc": 0.63716,
+      "apparent_auc": 0.68321,
+      "honest_logloss": 0.32477,
+      "live_logloss": 0.38094
+    },
+    "left-alone": {
+      "overstatement_pct": 13.08287,
+      "honest_auc": 0.61589,
+      "apparent_auc": 0.66641,
+      "honest_logloss": 0.33075,
+      "live_logloss": 0.39008
+    },
+    "reference": {
+      "overstatement_pct": 7.48824,
+      "honest_auc": 0.63825,
+      "apparent_auc": 0.68445,
+      "honest_logloss": 0.32423,
+      "live_logloss": 0.38109
+    }
+  },
+  "sd": {
+    "naive": {
+      "overstatement_pct": 7.10154,
+      "honest_auc": 0.00915,
+      "apparent_auc": 0.00807,
+      "honest_logloss": 0.00676,
+      "live_logloss": 0.00764
+    },
+    "ours": {
+      "overstatement_pct": 6.64154,
+      "honest_auc": 0.00841,
+      "apparent_auc": 0.00945,
+      "honest_logloss": 0.00749,
+      "live_logloss": 0.00906
+    },
+    "left-alone": {
+      "overstatement_pct": 10.47528,
+      "honest_auc": 0.01085,
+      "apparent_auc": 0.01173,
+      "honest_logloss": 0.00854,
+      "live_logloss": 0.00986
+    },
+    "reference": {
+      "overstatement_pct": 6.61072,
+      "honest_auc": 0.00846,
+      "apparent_auc": 0.00891,
+      "honest_logloss": 0.00782,
+      "live_logloss": 0.00913
+    }
+  },
+  "naive_picked_by_live_check": 20,
+  "ours_better_on_truth": 19,
+  "ours_less_overstated": 20
+}

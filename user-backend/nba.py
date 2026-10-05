@@ -6,7 +6,7 @@ decide()  : for one lead at one trigger (cart / checkout / wishlist / inactivity
             model, pick the action with the best incremental profit (or nothing),
             with a small random exploration share, and LOG the decision with its
             propensity. Those logs + later purchases are what the closed loop
-            retrains on (ml/retrain_nba_from_live.py), and what lets us measure
+            retrains on (learning.py), and what lets us measure
             the policy honestly (inverse-propensity estimates).
 execute() : carry the action out — send the email (with or without a coupon),
             or create a call / WhatsApp task for the sales team.
@@ -22,10 +22,11 @@ import catalog
 import database as db
 import ml_features as F
 import nba_core as N
+import settings
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "ml_models", "nba_model.pkl")
-EXPLORE_RATE = float(os.getenv("NBA_EXPLORE_RATE", "0.15"))
-DAILY_CALL_CAPACITY = int(os.getenv("NBA_DAILY_CALLS", "20"))
+EXPLORE_RATE = float(os.getenv("NBA_EXPLORE_RATE", settings.S["exploration_rate"]))
+DAILY_CALL_CAPACITY = int(os.getenv("NBA_DAILY_CALLS", settings.S["daily_call_capacity"]))
 
 _lock = threading.Lock()
 _state = {"bundle": None, "mtime": None, "warned": False}
@@ -37,7 +38,7 @@ def _load():
         mtime = os.path.getmtime(MODEL_PATH)
     except OSError:
         if not _state["warned"]:
-            print("[NBA] nba_model.pkl not found — using the built-in prior. Run train-model.bat.")
+            print("[NBA] nba_model.pkl not found — using the built-in prior. start-all.bat trains it on first start.")
             _state["warned"] = True
         return None
     if _state["mtime"] != mtime:
@@ -57,7 +58,18 @@ _PRIOR = {"email_info": [0.05, 0, 0, 0, 0, 0, 0.2, 0, 0], "email_coupon_10": [0.
           "whatsapp": [0.1, 0, 0, 0, 0.2, 0, 0, 0.1, 0]}
 
 
+def _anchor(probs: dict, base_prob: float) -> dict:
+    """The lead model says how likely this person is to buy on their own (the learning loop keeps that
+    honest on the control group); the uplift model says how much each action changes it. Every action's
+    log-odds are shifted by the same amount so that 'do nothing' equals the lead score exactly: one number
+    for 'on their own' everywhere (score, decision table, what-if paths), each action keeping its effect."""
+    clip = lambda p: min(max(float(p), 1e-4), 1 - 1e-4)
+    d = N._logit([clip(base_prob)])[0] - N._logit([clip(probs["none"])])[0]
+    return {a: float(1 / (1 + np.exp(-(N._logit([clip(p)])[0] + d)))) for a, p in probs.items()}
+
+
 def action_probabilities(features: dict, base_prob: float) -> dict:
+    """P(buy within the outcome window | this person, action), for every action."""
     frame = F.to_model_frame([features])
     ctx = N.context(frame, np.array([base_prob]))
     b = _load()
@@ -66,7 +78,7 @@ def action_probabilities(features: dict, base_prob: float) -> dict:
         return {a: float(1 / (1 + np.exp(-(base + (np.dot(ctx[0], _PRIOR[a]) if a != "none" else 0)))))
                 for a in N.ACTION_LIST}
     probs = N.predict_actions(b["model"], frame, np.array([base_prob]))
-    return {a: float(p[0]) for a, p in probs.items()}
+    return _anchor({a: float(p[0]) for a, p in probs.items()}, base_prob)
 
 
 def _calls_today():
@@ -113,13 +125,21 @@ def decide(user_id, trigger, pred, course_slug=None, explore=True, allowed=None,
     if all(blocked[a] for a in N.ACTION_LIST):
         blocked["none"] = None      # nothing else is possible (opted out everywhere): do nothing
     action, policy, propensity, best = N.choose(values, blocked, EXPLORE_RATE if explore else 0.0, _rng)
+    holdout = settings.in_global_control(user_id)
+    if holdout:          # the untouched control group: decide (for the record) but never act
+        action, policy, propensity = "none", "holdout", 1.0
     b = _load()
     options = [{"action": a, "label": N.ACTIONS[a]["label"], "blocked": blocked[a], **values[a]} for a in N.ACTION_LIST]
+    if holdout:
+        why = (f"In the {settings.S['global_control']['share']:.0%} control group: the CRM never contacts this lead "
+               f"automatically, so what they do shows what happens without us. (The model would have chosen: "
+               f"{N.ACTIONS[best]['label'].lower()}.)")
+    else:
+        why = _why(action, values, base_p, price) + (f" (Chosen at random as part of the {EXPLORE_RATE:.0%} learning sample.)"
+                                                     if policy == "explore" and action != best else "")
     decision = {
         "action": action, "label": N.ACTIONS[action]["label"], "policy": policy, "propensity": propensity,
-        "model_best": best, "trigger": trigger,
-        "why": _why(action, values, base_p, price) + (" (Chosen at random as part of the 15% learning sample.)"
-                                                       if policy == "explore" and action != best else ""),
+        "model_best": best, "trigger": trigger, "why": why,
         "detail": f"Course price ₹{price:,.0f} · model {b['version'] if b else 'prior'} · trigger {trigger}",
         "options": options, "model_version": b["version"] if b else "prior", "price": price,
     }

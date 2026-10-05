@@ -3,6 +3,10 @@ main.py — X Education User Backend (port 8000)
 All API routes for the user-facing website.
 """
 import os
+# One request = one small prediction. Thread pools (OpenMP/BLAS) make a single-row prediction up to
+# 40x slower when the machine is busy (measured: 550 ms -> 12 ms), so the server uses one thread each.
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_v, "1")
 import re
 import sqlite3
 import uuid
@@ -25,6 +29,7 @@ from recommendations import recommend
 from scheduler       import start_scheduler
 from outreach        import send_tracked_email
 from playbook        import handle_trigger
+import perf
 
 load_dotenv()
 app = FastAPI(title="X Education User API", version="2.0.0")
@@ -304,6 +309,45 @@ def change_password(body: ChangePasswordRequest, user=Depends(get_current_user))
     return {"message": "Password changed."}
 
 
+@app.delete("/api/me")
+def delete_my_account(user=Depends(get_current_user)):
+    """Right to erasure: deletes the person and everything linked to them (contact records, events,
+    emails, decisions, purchases ...). Cannot be undone."""
+    con = db.get_conn()
+    try:
+        tables = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+        removed = 0
+        for t in tables:
+            cols = [r[1] for r in con.execute(f"PRAGMA table_info({t})")]
+            if "user_id" in cols and t != "users":
+                removed += con.execute(f"DELETE FROM {t} WHERE user_id=?", (user["id"],)).rowcount
+        con.execute("DELETE FROM otp_tokens WHERE email=?", (user["email"],))
+        try:                                       # questions the team asked the Copilot about this person
+            for v in {user["email"], (user.get("name") or "").strip()} - {""}:
+                removed += con.execute("""DELETE FROM copilot_log WHERE question LIKE ? OR answer LIKE ?
+                                          OR tools_json LIKE ? OR drafts_json LIKE ?""", (f"%{v}%",) * 4).rowcount
+        except sqlite3.Error:
+            pass
+        con.execute("DELETE FROM users WHERE id=?", (user["id"],))
+        con.commit()
+    finally:
+        con.close()
+    # The marketing database keeps one personal log: WhatsApp messages (with the phone number).
+    mkt_db = os.getenv("MKT_DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                                                   "marketing-backend", "xeducation_marketing.db"))
+    if os.path.exists(mkt_db):
+        mcon = sqlite3.connect(mkt_db, timeout=30)
+        try:
+            removed += mcon.execute("DELETE FROM sms_queue WHERE user_id=?", (user["id"],)).rowcount
+            mcon.commit()
+        except sqlite3.Error:
+            pass                                   # no WhatsApp log yet
+        finally:
+            mcon.close()
+    print(f"[PRIVACY] Deleted user {user['id']} and {removed} linked records at their request.")
+    return {"message": "Your account and all data linked to it have been deleted."}
+
+
 # ── PROFILE ───────────────────────────────────────────────────────────────────
 @app.post("/api/profile/complete")
 def complete_profile(body: ProfileRequest, user=Depends(get_current_user)):
@@ -370,7 +414,8 @@ def track_event(body: BehaviourEvent, user=Depends(get_current_user)):
 
     # Re-score live and keep the person's lead row current. A snapshot for
     # closed-loop retraining is kept at most every 30 min.
-    _, pred = rescore_latest_lead(user["id"], "activity", snapshot_gap_minutes=30)
+    with perf.timer("event_to_score"):
+        _, pred = rescore_latest_lead(user["id"], "activity", snapshot_gap_minutes=30)
     return {"tracked": True, "live_score": pred["lead_score"], "persona": pred["persona"],
             "tier": pred["recommended_action"]}
 
@@ -566,7 +611,7 @@ def checkout(body: CheckoutRequest, user=Depends(get_current_user)):
 
     # ── CLOSED LOOP: the purchase is the real outcome. Rescore the lead with the
     # model (so the dashboard shows it), and the score_snapshots taken before
-    # this moment now get labelled "converted" for retraining (ml/retrain_from_live.py).
+    # this moment now get labelled "converted" for retraining (the learning loop, learning.py).
     _, pred = rescore_latest_lead(user["id"], "purchase_conversion")
 
     # ── Attributed, properly-branded purchase confirmation email ──
@@ -819,3 +864,65 @@ def trigger_jobs_manually(x_internal_key: str = Header(None)):
                           FROM nba_decisions d JOIN users u ON u.id = d.user_id
                           WHERE d.id > ? ORDER BY d.id""", (last,))
     return {"message": f"Automations ran: {len(made)} new decision(s).", "decisions": made}
+
+
+# ── LEARNING LOOP, WHAT-IF PATHS, JOURNEYS (called by the marketing backend) ──
+def _internal(key):
+    if key != INTERNAL_API_KEY:
+        raise HTTPException(403, "Forbidden")
+
+
+@app.post("/api/internal/learn")
+def internal_learn(dry_run: bool = False, x_internal_key: str = Header(None)):
+    """Run the learning loop now ("Retrain now" on the dashboard)."""
+    _internal(x_internal_key)
+    import learning
+    try:
+        res = learning.run(reason="manual", force=True, dry_run=dry_run)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    res.pop("_new_live", None)
+    return res
+
+
+@app.get("/api/internal/learning/status")
+def internal_learning_status(x_internal_key: str = Header(None)):
+    _internal(x_internal_key)
+    import learning
+    ok, known, new = learning.due()
+    return {"outcomes_known": known, "new_outcomes": new, "due": ok,
+            "min_new_outcomes": learning.CONF.get("min_new_outcomes"), "latency": perf.summary(),
+            "model": model_info()}
+
+
+@app.get("/api/internal/paths/{user_id}")
+def internal_paths(user_id: int, depth: int = 2, x_internal_key: str = Header(None)):
+    _internal(x_internal_key)
+    import paths
+    out = paths.plan(user_id, depth=max(2, min(depth, 3)))
+    if out is None:
+        raise HTTPException(404, "User not found")
+    return out
+
+
+@app.get("/api/internal/journeys")
+def internal_journeys(days: int = 180, tier: str = None, x_internal_key: str = Header(None)):
+    _internal(x_internal_key)
+    import journeys
+    return journeys.summary(days=max(7, min(days, 3650)), tier=tier or None)
+
+
+@app.get("/api/internal/pipeline")
+def internal_pipeline(limit: int = 40, search: str = None, include_simulated: bool = True,
+                      x_internal_key: str = Header(None)):
+    """The sales pipeline board: every lead in its lifecycle stage (live from behaviour)."""
+    _internal(x_internal_key)
+    import journeys
+    with perf.timer("pipeline_board"):
+        return journeys.pipeline(limit=max(1, min(limit, 500)), search=search, include_simulated=include_simulated)
+
+
+@app.get("/api/internal/latency")
+def internal_latency(x_internal_key: str = Header(None)):
+    _internal(x_internal_key)
+    return perf.summary()

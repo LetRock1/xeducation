@@ -1,35 +1,33 @@
 # Python
-venv/
 __pycache__/
 *.pyc
-
-# Node.js
-node_modules/
-
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Environment files (contain secrets)
-.env
-*/.env
-
-.env
 venv/
+.venv/
+
+# Node / build output
 node_modules/
+dist/
+
+# Secrets — copy .env.example to .env instead
+.env
+
+# Databases (created on first run)
 *.db
 *.db-wal
 *.db-shm
-__pycache__/
-user-backend/ml_models/*.pkl
+
+# Trained models (start-all.bat trains them with your own scikit-learn)
+user-backend/ml_models/
+
+# Generated training data (ml/generate_dataset.py)
 ml/lead_data_v4.csv
 
-# added by the v5 update
-.venv/
-dist/
-user-backend/ml_models/
+# Editors / OS / local tool settings
 .vscode/
 .idea/
+.DS_Store
+Thumbs.db
 .claude/settings.local.json
+
+# Snapshot made by scraping.py (for sharing the code), not part of the project
 new.txt

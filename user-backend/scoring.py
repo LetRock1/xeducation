@@ -12,9 +12,10 @@ import json
 import catalog
 import database as db
 import ml_features as F
+import settings
 from predict import predict_lead
 
-COUPON_VALID_HOURS = 72
+COUPON_VALID_HOURS = int(settings.S["coupon_valid_hours"])
 
 
 def build_raw(user_id, course=None, lead_source=None, whatsapp_opt_in=None):

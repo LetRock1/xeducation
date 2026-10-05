@@ -62,7 +62,7 @@ export default function Signup() {
           <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-accent to-gold flex items-center justify-center font-display font-black text-navy text-2xl mx-auto mb-4 shadow-lg shadow-sky-accent/20">X</div>
           <h1 className="font-display text-3xl font-extrabold text-navy">{step==='form' ? 'Create Account' : 'Verify Email'}</h1>
           <p className="text-slate-500 text-sm mt-1">
-            {step==='form' ? 'Join 500,000+ learners transforming their careers' : `Enter the 6-digit OTP sent to ${form.email}`}
+            {step==='form' ? 'Save courses, get offers and talk to an advisor' : `Enter the 6-digit OTP sent to ${form.email}`}
           </p>
         </div>
 
@@ -73,6 +73,7 @@ export default function Signup() {
               <div><label className="lbl">Email Address *</label><input type="email" required value={form.email} onChange={e=>set('email',e.target.value)} placeholder="priya@gmail.com" className="inp"/></div>
               <div><label className="lbl">Password *</label><input type="password" required minLength={6} value={form.password} onChange={e=>set('password',e.target.value)} placeholder="Min 6 characters" className="inp"/></div>
               {error && <p className="text-red-500 text-sm bg-red-50 border border-red-200 rounded-xl px-3 py-2">⚠️ {error}</p>}
+              <p className="text-slate-500 text-xs">By creating an account you agree that this site records what you do on it, as explained in the <Link to="/privacy" className="text-sky-accent hover:underline">privacy notice</Link>.</p>
               <button type="submit" disabled={loading} className="w-full btn-primary mt-2">{loading ? 'Sending OTP…' : 'Create Account →'}</button>
             </form>
           ) : (

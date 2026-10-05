@@ -14,7 +14,7 @@
       - expected profit of 8 targeting policies, per 1,000 leads, with the
         same advisor-call capacity for everyone (10% of leads)
  The model learned here is the cold-start PRIOR. Once the website has logged
- real decisions + outcomes, ml/retrain_nba_from_live.py updates it.
+ real decisions + outcomes, the learning loop (user-backend/learning.py) updates it.
 
  Run with the backend venv:  user-backend\\venv\\Scripts\\python.exe ml\\train_uplift.py
 =================================================================
@@ -38,15 +38,22 @@ import train_model as T               # noqa: E402
 
 F, N = S.F, S.N
 NBA_PATH = os.path.join(T.MODEL_DIR, "nba_model.pkl")
+NBA_STARTER_PATH = os.path.join(T.MODEL_DIR, "nba_model.starter.pkl")   # what a history starts from
 NBA_CARD = os.path.join(T.MODEL_DIR, "nba_card.json")
 RESULTS_DIR = os.path.join(HERE, "results")
 CALL_CAPACITY = 0.10
 
 
-def base_probability(frame):
-    if not os.path.exists(T.MODEL_PATH):
-        raise SystemExit("Train the lead model first: ml/train_model.py")
-    return joblib.load(T.MODEL_PATH)["pipeline"].predict_proba(frame)[:, 1]
+def base_probability(frame, bundle=None):
+    """The live lead model's P(buy | no action) — the 'base' every action is compared with."""
+    import lead_model as LM
+    if bundle is None:
+        if not os.path.exists(T.MODEL_PATH):
+            raise SystemExit("Train the lead model first: ml/train_model.py")
+        bundle = joblib.load(T.MODEL_PATH)
+    if "starter" not in bundle:
+        raise SystemExit("The lead model is from an older version — run ml/train_model.py first.")
+    return LM.predict_proba(bundle, frame)
 
 
 def fit_uplift(frame, base_p, actions, y, weights=None, C=1.0):
@@ -212,6 +219,7 @@ def main():
               "sklearn_version": sklearn.__version__, "trained_on": {"simulated_rows": int(len(y)), "real_rows": 0},
               "uplift_quality": uplift_quality}
     joblib.dump(bundle, NBA_PATH)
+    joblib.dump(bundle, NBA_STARTER_PATH)
     coefs = clf.coef_[0].reshape(1 + len(N.TREATMENTS), len(N.CONTEXT_NAMES))
     card = {k: v for k, v in bundle.items() if k != "model"}
     card["action_effects_logodds"] = {a: dict(zip(N.CONTEXT_NAMES, np.round(coefs[i + 1], 3).tolist()))

@@ -1,32 +1,28 @@
 """
 =================================================================
- X EDUCATION — LEAD SCORING MODEL TRAINER (v4)
+ X EDUCATION CRM — BASE LEAD MODEL (v6)
 =================================================================
- Replaces the old notebook export. Produces ONE file the backend loads:
+ Produces the files the backend loads:
 
-     user-backend/ml_models/lead_model.pkl   (preprocessing + model, one Pipeline)
-     user-backend/ml_models/model_card.json  (version, metrics, what it was trained on)
+     user-backend/ml_models/lead_model.pkl          the live model (base model + live layer)
+     user-backend/ml_models/lead_model.starter.pkl  a copy of the fresh base model
+     user-backend/ml_models/model_card.json         version, metrics, what it was trained on
 
- IMPORTANT — run it with the backend's own Python so the scikit-learn
- version that trains the model is the same one that loads it:
+ The lead score is   base model (this script)  +  live layer (learned from the CRM's own
+ outcomes by the learning loop, user-backend/learning.py). See user-backend/lead_model.py.
 
+ Training data: 60,000 simulated leads from ml/generate_dataset.py, with exactly the
+ signals the website records (profile, visits, time, video, pricing, brochure, chat,
+ webinar, wishlist, cart, checkout, enquiry, email clicks, WhatsApp, consent). The
+ public X Education dataset cannot be used for this: it has none of the website's
+ behaviour columns. It is used to test the METHOD on real data instead
+ (ml/experiments/model_benchmark.py: same model family, 9 leak-free real columns).
+
+ Two candidates (logistic regression, gradient boosting) are compared on a held-out
+ 20 %; logistic regression is kept unless boosting is clearly better (lower log-loss).
+
+ Run with the backend's own Python (start-all.bat does this on first start):
      user-backend\\venv\\Scripts\\python.exe ml\\train_model.py
- (or just double-click train-model.bat in the project root)
-
- What it does:
-   1. Loads ml/lead_data_v4.csv (generates it if missing)
-   2. Engineers features with user-backend/ml_features.py (same code as live)
-   3. Trains two candidates — Logistic Regression and Gradient Boosting —
-      and keeps the one with the best log-loss on held-out data
-      (log-loss rewards honest probabilities, not just ranking)
-   4. Prints accuracy, ROC-AUC, calibration, and the real conversion rate
-      inside each action tier, then a sanity check on typical website journeys
-   5. Saves the bundle; the running backend picks it up automatically.
-
- Why no KMeans/PCA persona any more: the old clusters were ordered by
- "engagement", but "Warm Lead" converted better than "Hot Lead", and the
- cluster was also fed back into the model as a feature. Persona is now
- derived from the calibrated score, so it always agrees with it.
 =================================================================
 """
 import argparse
@@ -36,15 +32,14 @@ import os
 import shutil
 import sys
 
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
 import sklearn
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (accuracy_score, brier_score_loss, f1_score,
-                             log_loss, roc_auc_score)
+from sklearn.metrics import accuracy_score, brier_score_loss, log_loss, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
@@ -52,12 +47,15 @@ from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardSc
 HERE = os.path.dirname(os.path.abspath(__file__))
 BACKEND = os.path.join(HERE, "..", "user-backend")
 sys.path.insert(0, BACKEND)
-import ml_features as F  # noqa: E402
+import lead_model as LM   # noqa: E402
+import ml_features as F   # noqa: E402
 
 MODEL_DIR = os.path.join(BACKEND, "ml_models")
 MODEL_PATH = os.path.join(MODEL_DIR, "lead_model.pkl")
+STARTER_PATH = os.path.join(MODEL_DIR, "lead_model.starter.pkl")
 CARD_PATH = os.path.join(MODEL_DIR, "model_card.json")
 DATA_PATH = os.path.join(HERE, "lead_data_v4.csv")
+ROWS = 60000
 
 SKEWED = ["TotalVisits", "TotalTimeOnWebsite", "TimePerVisit", "EmailOpenedCount"]
 
@@ -76,73 +74,54 @@ def candidates():
     return {
         "logistic_regression": LogisticRegression(C=0.5, max_iter=3000),
         "gradient_boosting": HistGradientBoostingClassifier(
-            max_iter=400, learning_rate=0.05, max_leaf_nodes=24,
-            min_samples_leaf=40, l2_regularization=1.0,
-            early_stopping=True, validation_fraction=0.1,
+            max_iter=400, learning_rate=0.05, max_leaf_nodes=24, min_samples_leaf=40,
+            l2_regularization=1.0, early_stopping=True, validation_fraction=0.1,
             n_iter_no_change=25, random_state=42),
     }
 
 
-def evaluate(y, p):
-    pred = (p >= 0.5).astype(int)
-    return {
-        "roc_auc": round(float(roc_auc_score(y, p)), 4),
-        "log_loss": round(float(log_loss(y, p)), 4),
-        "brier": round(float(brier_score_loss(y, p)), 4),
-        "accuracy": round(float(accuracy_score(y, pred)), 4),
-        "f1": round(float(f1_score(y, pred)), 4),
-    }
+def ece(y, p, bins=10):
+    """Expected calibration error: mean |predicted - actual| over 10 probability bins."""
+    y, p = np.asarray(y), np.asarray(p)
+    edges = np.linspace(0, 1, bins + 1)
+    total = 0.0
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        m = (p >= lo) & (p < hi) if hi < 1 else (p >= lo) & (p <= hi)
+        if m.any():
+            total += m.mean() * abs(p[m].mean() - y[m].mean())
+    return float(total)
+
+
+def metrics(y, p):
+    y, p = np.asarray(y), np.asarray(p)
+    k = max(1, int(0.1 * len(y)))
+    top = np.argsort(-p)[:k]
+    return {"roc_auc": round(float(roc_auc_score(y, p)), 4), "log_loss": round(float(log_loss(y, p)), 4),
+            "brier": round(float(brier_score_loss(y, p)), 4), "ece": round(ece(y, p), 4),
+            "accuracy": round(float(accuracy_score(y, (p >= 0.5).astype(int))), 4),
+            "precision_top10": round(float(np.mean(y[top])), 4)}
 
 
 def tier_table(y, p):
-    s = pd.Series(p * 100)
-    tiers = s.apply(F.tier_for)
-    t = pd.DataFrame({"tier": tiers, "y": np.asarray(y), "p": p})
+    t = pd.DataFrame({"tier": pd.Series(p * 100).apply(F.tier_for), "y": np.asarray(y), "p": p})
     out = t.groupby("tier").agg(leads=("y", "size"), predicted=("p", "mean"), actual=("y", "mean"))
     order = [name for _, name in F.TIERS]
     return out.reindex([o for o in order if o in out.index])
 
 
-def fit_best(X_tr, y_tr, X_va, y_va, w_tr=None, verbose=True):
-    """Train every candidate, return (name, fitted pipeline, metrics) of the best."""
-    results = []
-    for name, clf in candidates().items():
-        pipe = Pipeline([("prep", build_preprocessor()), ("clf", clf)])
-        pipe.fit(X_tr, y_tr, clf__sample_weight=w_tr)
-        p = pipe.predict_proba(X_va)[:, 1]
-        m = evaluate(y_va, p)
-        results.append((m["log_loss"], name, pipe, m))
-        if verbose:
-            print(f"  {name:20s} AUC={m['roc_auc']:.4f}  log-loss={m['log_loss']:.4f}  "
-                  f"Brier={m['brier']:.4f}  accuracy={m['accuracy']*100:.1f}%")
-    results.sort(key=lambda r: r[0])
-    _, name, pipe, m = results[0]
-    # Prefer logistic regression unless boosting is clearly better: it is
-    # monotonic (doing more never lowers a score), fully explainable, and
-    # far less likely to break when scikit-learn is upgraded.
-    lr = next(r for r in results if r[1] == "logistic_regression")
-    if name != "logistic_regression" and lr[0] - results[0][0] < 0.005:
-        _, name, pipe, m = lr
-    return name, pipe, m
+def atomic_dump(obj, path):
+    tmp = path + ".tmp"
+    joblib.dump(obj, tmp)
+    os.replace(tmp, path)
 
 
-def save_bundle(pipe, name, metrics, base_rate, trained_on, extra=None):
-    os.makedirs(MODEL_DIR, exist_ok=True)
-    version = dt.datetime.now().strftime("v4-%Y%m%d-%H%M%S")
-    if os.path.exists(MODEL_PATH):
-        shutil.copy2(MODEL_PATH, MODEL_PATH.replace(".pkl", ".previous.pkl"))
-    bundle = {
-        "pipeline": pipe, "model_type": name, "version": version,
-        "feature_version": F.FEATURE_VERSION, "sklearn_version": sklearn.__version__,
-        "trained_at": dt.datetime.now().isoformat(timespec="seconds"),
-        "metrics": metrics, "base_rate": base_rate, "trained_on": trained_on,
-    }
-    joblib.dump(bundle, MODEL_PATH)
-    card = {k: v for k, v in bundle.items() if k != "pipeline"}
+def write_card(bundle, extra=None):
+    card = {k: v for k, v in bundle.items() if k not in ("starter",)}
     card.update(extra or {})
-    with open(CARD_PATH, "w", encoding="utf-8") as f:
-        json.dump(card, f, indent=2)
-    return version
+    tmp = CARD_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(card, f, indent=2, default=str)
+    os.replace(tmp, CARD_PATH)
 
 
 JOURNEYS = [
@@ -162,48 +141,68 @@ JOURNEY_BASE = dict(LeadOrigin="Landing Page Submission", LeadSource="Direct Tra
                     TotalVisits=1, TotalTimeOnWebsite=0, PageViewsPerVisit=1)
 
 
-def journey_check(pipe):
-    rows = [dict(JOURNEY_BASE, **j) for _, j in JOURNEYS]
-    p = pipe.predict_proba(F.to_model_frame(rows))[:, 1]
-    print("\nSanity check — typical website journeys (Working Professional unless stated):")
-    for (label, _), prob in zip(JOURNEYS, p):
-        s = prob * 100
-        print(f"  {label:38s} {s:5.1f}  {F.persona_for(s):9s}  {F.tier_for(s)}")
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=DATA_PATH)
     args = ap.parse_args()
 
     if not os.path.exists(args.data):
-        print("Dataset not found — generating it first...")
+        print(f"Generating {ROWS:,} simulated leads (ml/generate_dataset.py) ...", flush=True)
         import generate_dataset
-        generate_dataset.generate(60000).to_csv(args.data, index=False)
-
+        generate_dataset.generate(ROWS).to_csv(args.data, index=False)
     df = pd.read_csv(args.data)
     X = F.to_model_frame(df)
     y = df[F.TARGET].astype(int).to_numpy()
-    print(f"Rows: {len(df):,}   conversion rate: {y.mean()*100:.1f}%   features: {X.shape[1]}")
+    print(f"Simulated leads: {len(df):,}   bought: {y.mean()*100:.1f}%   inputs: {X.shape[1]} "
+          f"(every signal the website records)")
 
     X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
     print("\nCandidates (held-out 20%):")
-    name, pipe, metrics = fit_best(X_tr, y_tr, X_te, y_te)
-    print(f"\nSelected: {name}")
+    results, fitted = {}, {}
+    for name, clf in candidates().items():
+        pipe = Pipeline([("prep", build_preprocessor()), ("clf", clf)])
+        pipe.fit(X_tr, y_tr)
+        results[name] = metrics(y_te, pipe.predict_proba(X_te)[:, 1])
+        fitted[name] = pipe
+        m = results[name]
+        print(f"  {name:20s} AUC={m['roc_auc']:.3f}  log-loss={m['log_loss']:.4f}  Brier={m['brier']:.4f}  "
+              f"ECE={m['ece']:.3f}  accuracy={m['accuracy']*100:.1f}%")
+    best = min(results, key=lambda n: results[n]["log_loss"])
+    if best != "logistic_regression" and results["logistic_regression"]["log_loss"] - results[best]["log_loss"] < 0.005:
+        best = "logistic_regression"
+    print(f"\nSelected: {best}")
+    print("\nTiers on held-out leads (does a tier mean what it says?):")
+    print(tier_table(y_te, fitted[best].predict_proba(X_te)[:, 1]).round(3).to_string())
 
-    p_te = pipe.predict_proba(X_te)[:, 1]
-    print("\nAction tiers on held-out leads (does the tier mean what it says?):")
-    print(tier_table(y_te, p_te).round(3).to_string())
-
-    # Refit the chosen model on all data before saving
-    final = Pipeline([("prep", build_preprocessor()), ("clf", candidates()[name])])
+    final = Pipeline([("prep", build_preprocessor()), ("clf", candidates()[best])])
     final.fit(X, y)
-    journey_check(final)
 
-    version = save_bundle(final, name, metrics, float(y.mean()),
-                          {"synthetic_rows": int(len(df)), "real_rows": 0})
+    version = dt.datetime.now().strftime("v6-base-%Y%m%d-%H%M%S")
+    bundle = {
+        "kind": "starter+live", "starter": final, "starter_columns": list(F.MODEL_COLUMNS),
+        "live": LM.empty_live(), "model_type": best, "version": version,
+        "feature_version": F.FEATURE_VERSION, "sklearn_version": sklearn.__version__,
+        "trained_at": dt.datetime.now().isoformat(timespec="seconds"),
+        "metrics": results[best], "metrics_all_candidates": results, "base_rate": float(y.mean()),
+        "trained_on": {"simulated_leads": int(len(df)), "history_outcomes": 0},
+        "starter_version": version,
+    }
+    print("\nSanity check — typical website journeys (Working Professional unless stated):")
+    jp = LM.predict_proba(bundle, F.to_model_frame([dict(JOURNEY_BASE, **j) for _, j in JOURNEYS]))
+    for (label, _), p in zip(JOURNEYS, jp):
+        print(f"  {label:38s} {p*100:5.1f}  {F.tier_for(p*100)}")
+
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    if os.path.exists(MODEL_PATH):
+        shutil.copy2(MODEL_PATH, MODEL_PATH.replace(".pkl", ".previous.pkl"))
+    atomic_dump(bundle, MODEL_PATH)
+    atomic_dump(bundle, STARTER_PATH)
+    write_card(bundle, {"note": "Base model trained on simulated leads that carry every signal the website "
+                                "records. The live layer starts at zero and is learned by the learning loop "
+                                "from this CRM's own outcomes. The same method on the 9,240 real X Education "
+                                "leads (leak-free columns only): ml/results/model_benchmark.md."})
     print(f"\nSaved {MODEL_PATH}\n  version {version}  (scikit-learn {sklearn.__version__})")
-    print("The running backend reloads it automatically on the next score.")
+    print("The running backend reloads it automatically.")
 
 
 if __name__ == "__main__":

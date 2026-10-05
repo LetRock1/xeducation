@@ -2,11 +2,59 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   getLead, sendEmail, aiImprove, whatsappLink, generateCoupon, getLeadExplain,
-  getLeadAttribution, rescoreLead, closeCallback,
+  getLeadAttribution, rescoreLead, closeCallback, getLeadPaths,
 } from '../utils/api'
 
 const fmt = d => d ? new Date(String(d).replace(' ', 'T')).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '—'
 const yes = v => v ? 'Yes' : '—'
+const p0 = x => (x == null ? '—' : `${(x * 100).toFixed(0)}%`)
+const inr = x => (x == null ? '—' : `₹${Math.round(x).toLocaleString('en-IN')}`)
+const REACT_COLOR = { advanced: '#22c55e', engaged: '#38BDF8', clicked: '#a78bfa', none: '#64748b' }
+
+/* One team step → the learner's likely reactions → the best next step after each (from history + models). */
+function PathTree({ lead, step }) {
+  const rs = step.reactions || []
+  const W = 820, nodeW = 178, rowH = 66, H = Math.max(rs.length, 1) * rowH + 24
+  const col = [8, 214, 420, 632]
+  const ys = rs.map((_, i) => 12 + i * rowH + rowH / 2 - 6)
+  const mid = H / 2
+  const box = (x, y, w, h, fill, stroke) => <rect x={x} y={y} width={w} height={h} rx="10" fill={fill} stroke={stroke} />
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="What-if path tree">
+      {/* edges */}
+      <path d={`M${col[0] + nodeW},${mid} L${col[1]},${mid}`} stroke="#f97316" strokeWidth="3" fill="none" />
+      {rs.map((r, i) => (
+        <g key={`e${i}`}>
+          <path d={`M${col[1] + nodeW},${mid} C${col[1] + nodeW + 20},${mid} ${col[2] - 20},${ys[i]} ${col[2]},${ys[i]}`}
+            stroke={REACT_COLOR[r.reaction] || '#64748b'} strokeOpacity="0.8" strokeWidth={Math.max(1.5, r.prob * 14)} fill="none" />
+          <path d={`M${col[2] + nodeW},${ys[i]} L${col[3]},${ys[i]}`} stroke="#475569" strokeWidth="1.5" strokeDasharray="4 3" fill="none" />
+        </g>
+      ))}
+      {/* now */}
+      {box(col[0], mid - 30, nodeW, 60, 'rgba(255,255,255,0.05)', 'rgba(255,255,255,0.15)')}
+      <text x={col[0] + 10} y={mid - 12} fill="#94a3b8" fontSize="10">NOW · {lead.stage}</text>
+      <text x={col[0] + 10} y={mid + 4} fill="#fff" fontSize="13" fontWeight="700">{lead.name?.slice(0, 20)}</text>
+      <text x={col[0] + 10} y={mid + 20} fill="#cbd5e1" fontSize="11">score {Math.round(lead.score)} · {p0(lead.probability)} if not contacted</text>
+      {/* team step */}
+      {box(col[1], mid - 30, nodeW, 60, 'rgba(249,115,22,0.12)', 'rgba(249,115,22,0.6)')}
+      <text x={col[1] + 10} y={mid - 12} fill="#fdba74" fontSize="10">TEAM DOES</text>
+      <text x={col[1] + 10} y={mid + 4} fill="#fff" fontSize="12" fontWeight="700">{step.label.slice(0, 27)}</text>
+      <text x={col[1] + 10} y={mid + 20} fill="#cbd5e1" fontSize="11">{p0(step.p_buy_step)} buy in 14 days</text>
+      {/* reactions + next steps */}
+      {rs.map((r, i) => (
+        <g key={`n${i}`}>
+          {box(col[2], ys[i] - 24, nodeW, 48, 'rgba(255,255,255,0.04)', REACT_COLOR[r.reaction] || '#64748b')}
+          <text x={col[2] + 10} y={ys[i] - 7} fill="#fff" fontSize="11" fontWeight="600">{r.label}</text>
+          <text x={col[2] + 10} y={ys[i] + 9} fill="#94a3b8" fontSize="10">{p0(r.prob)} likely · then score {Math.round(r.next?.score ?? 0)} ({r.next?.stage})</text>
+          {box(col[3], ys[i] - 24, nodeW, 48, 'rgba(56,189,248,0.07)', 'rgba(56,189,248,0.35)')}
+          <text x={col[3] + 10} y={ys[i] - 10} fill="#7dd3fc" fontSize="9">BEST NEXT STEP</text>
+          <text x={col[3] + 10} y={ys[i] + 4} fill="#fff" fontSize="11" fontWeight="600">{r.best_next?.label?.slice(0, 27)}</text>
+          <text x={col[3] + 10} y={ys[i] + 17} fill="#94a3b8" fontSize="10">{p0(r.best_next?.p_buy)} chance they buy</text>
+        </g>
+      ))}
+    </svg>
+  )
+}
 
 function Note({ text }) {
   if (!text) return null
@@ -28,6 +76,9 @@ export default function LeadDetail() {
   const [coupon, setCoupon] = useState({ pct: 10, hours: 72 })
   const [explain, setExplain] = useState(null)
   const [attribution, setAttribution] = useState(null)
+  const [paths, setPaths] = useState(null)
+  const [pathsErr, setPathsErr] = useState('')
+  const [pick, setPick] = useState(null)
 
   const note = (k, t) => setMsg(m => ({ ...m, [k]: t }))
 
@@ -94,6 +145,13 @@ export default function LeadDetail() {
     setTab(key)
     if (key === 'explain' && !explain) getLeadExplain(id).then(r => setExplain(r.data)).catch(() => {})
     if (key === 'attribution' && !attribution) getLeadAttribution(id).then(r => setAttribution(r.data)).catch(() => {})
+    if (key === 'paths' && !paths) loadPaths()
+  }
+
+  function loadPaths() {
+    setPathsErr('')
+    getLeadPaths(id, 3).then(r => { setPaths(r.data); setPick(r.data.best) })
+      .catch(e => setPathsErr(e.response?.data?.detail || 'Could not work out the paths for this lead.'))
   }
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="w-8 h-8 border-4 border-ember border-t-transparent rounded-full animate-spin" /></div>
@@ -102,7 +160,7 @@ export default function LeadDetail() {
   const SC = s => s >= 80 ? 'text-red-400' : s >= 60 ? 'text-orange-400' : s >= 40 ? 'text-yellow-400' : 'text-slate-400'
   const openCallbacks = (lead.callbacks || []).filter(c => c.status === 'open')
   const tabs = [
-    ['action', 'Recommended action'], ['email', 'Email'], ['whatsapp', 'WhatsApp'], ['activity', 'Activity'],
+    ['action', 'Recommended action'], ['paths', 'What-if paths'], ['email', 'Email'], ['whatsapp', 'WhatsApp'], ['activity', 'Activity'],
     ['chat', `Chat & callbacks${openCallbacks.length ? ` (${openCallbacks.length})` : ''}`], ['coupon', 'Coupon'],
     ['explain', 'Why this score?'], ['attribution', 'Attribution'],
   ]
@@ -114,7 +172,8 @@ export default function LeadDetail() {
         <h1 className="font-display text-2xl font-bold text-white">{lead.name}</h1>
         <span className={`font-display text-3xl font-extrabold ${SC(lead.lead_score)}`}>{Math.round(lead.lead_score)}<span className="text-slate-600 text-base font-normal">/100</span></span>
         <span className="text-xs px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-slate-300">{lead.recommended_action}</span>
-        {lead.email?.endsWith('@demo.xeducation.test') && <span className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-slate-400" title="Created by seed-demo-data.bat; outcomes come from the simulator">simulated learner</span>}
+        {lead.email?.endsWith('@demo.xeducation.test') && <span className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-slate-400" title="Part of the simulated starting history; outcomes come from the simulator">simulated learner</span>}
+        {lead.global_control && <span className="text-xs px-2.5 py-1 rounded-full bg-sky-500/10 border border-sky-500/30 text-sky-300" title="A fixed random 5% of leads never get automatic follow-ups. They show what happens without the CRM, and the learning loop checks every new model on them. Contacting them by hand mixes that up.">control group · no automatic follow-ups</span>}
         <button onClick={rescore} disabled={busy === 'rescore'} className="ml-auto text-xs border border-white/15 text-slate-300 rounded-lg px-3 py-1.5 hover:border-white/40 disabled:opacity-50">
           {busy === 'rescore' ? 'Re-scoring…' : '↻ Re-score now'}
         </button>
@@ -353,17 +412,76 @@ export default function LeadDetail() {
             </div>
           )}
 
+          {tab === 'paths' && (
+            <div className="card p-6 space-y-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-display font-semibold text-white">What-if paths</h3>
+                  <p className="text-slate-500 text-xs mt-1 max-w-2xl">If the team takes a step now, how is this learner likely to react in the next 3 days, and what is
+                    the best step after that? Chances to buy come from this lead's own models; the reactions are what similar leads did after
+                    the same step in the CRM's history.</p>
+                </div>
+                <button onClick={() => { setPaths(null); loadPaths() }} className="text-xs border border-white/15 text-slate-300 rounded-lg px-3 py-1.5 hover:border-white/40 whitespace-nowrap">↻ Refresh</button>
+              </div>
+              {pathsErr && <p className="text-red-400 text-sm">{pathsErr}</p>}
+              {!paths && !pathsErr && <p className="text-slate-500 text-sm">Working out the paths…</p>}
+              {paths && (
+                <>
+                  {paths.summary && <div className="bg-ember/10 border border-ember/30 rounded-xl p-4"><p className="text-white text-sm">{paths.summary}</p></div>}
+                  <div>
+                    <p className="text-slate-400 text-xs uppercase tracking-wide font-semibold mb-2">Step 1 — what the team can do now (click one)</p>
+                    <div className="grid sm:grid-cols-2 gap-2">
+                      {paths.steps.map(st => (
+                        <button key={st.action} onClick={() => setPick(st.action)}
+                          className={`text-left rounded-xl border p-3 transition-all ${pick === st.action ? 'border-ember bg-ember/10' : 'border-white/10 bg-white/5 hover:border-white/30'}`}>
+                          <div className="flex justify-between gap-2">
+                            <span className="text-white text-sm font-semibold">{st.label}</span>
+                            {st.action === paths.best && <span className="text-[10px] text-green-400 border border-green-500/40 rounded-full px-2 py-0.5 h-fit">best</span>}
+                          </div>
+                          <p className="text-slate-300 text-xs mt-1">{p0(st.p_buy_path)} chance to buy on this path (this step, then the best next one)
+                            {st.gain_vs_nothing != null && st.action !== 'none' ? ` · ${st.gain_vs_nothing >= 0 ? '+' : '−'}${inr(Math.abs(st.gain_vs_nothing))} vs waiting` : ''}</p>
+                          <p className="text-slate-600 text-[11px]">from {st.evidence.decisions} past decisions for {st.evidence.stage} leads</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {(() => {
+                    const st = paths.steps.find(x => x.action === pick) || paths.steps[0]
+                    if (!st) return null
+                    const after = st.then && (st.reactions || []).find(r => r.reaction === st.then.after)
+                    return (
+                      <div>
+                        <p className="text-slate-400 text-xs uppercase tracking-wide font-semibold mb-2">If the team chooses “{st.label}”</p>
+                        <PathTree lead={paths.lead} step={st} />
+                        {st.then && after && (
+                          <p className="text-slate-300 text-xs mt-2">Three steps ahead: if they {after.label.toLowerCase()} and the team then {after.best_next.label.toLowerCase()},
+                            the likeliest reaction is “{st.then.reaction2_label.toLowerCase()}”; the best third step is {st.then.step3_label.toLowerCase()} ({p0(st.then.p_buy)} chance to buy).</p>
+                        )}
+                      </div>
+                    )
+                  })()}
+                  {Object.keys(paths.blocked || {}).length > 0 && (
+                    <p className="text-slate-500 text-xs">Not possible now: {Object.entries(paths.blocked).map(([a, why]) => `${a.replaceAll('_', ' ')} (${why})`).join(' · ')}</p>
+                  )}
+                  <p className="text-slate-500 text-[11px]">{paths.note} History used: {paths.history?.decisions?.toLocaleString?.() ?? 0} decisions
+                    ({paths.history?.stage_decisions ?? 0} for {paths.lead.stage} leads).</p>
+                </>
+              )}
+            </div>
+          )}
+
           {tab === 'explain' && (
             <div className="card p-6">
               <h3 className="font-display font-semibold text-white mb-1">Why this score?</h3>
-              <p className="text-slate-500 text-xs mb-4">Each line shows how many points the score would change without that signal (computed by the model).</p>
+              <p className="text-slate-500 text-xs mb-4">Each line shows how many points the score would change without that signal (computed by the model).
+                The score is the chance this person buys within 14 days if we do nothing now.</p>
               {!explain ? <p className="text-slate-500 text-sm">Loading…</p> : (
                 <div className="space-y-2">
                   {explain.note && <p className="text-slate-400 text-sm">{explain.note}</p>}
                   {explain.factors.map((f, i) => (
-                    <div key={i} className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 flex items-center justify-between">
+                    <div key={i} className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
                       <div><p className="text-white font-semibold text-sm">{f.factor}</p><p className="text-slate-400 text-xs">{f.detail}</p></div>
-                      <span className={`font-mono text-sm ${(f.points ?? 0) < 0 ? 'text-red-400' : 'text-green-400'}`}>{f.impact}</span>
+                      <span className={`font-mono text-sm flex-shrink-0 ${(f.points ?? 0) < 0 ? 'text-red-400' : 'text-green-400'}`}>{f.impact}</span>
                     </div>
                   ))}
                 </div>

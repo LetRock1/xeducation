@@ -2,34 +2,35 @@
 decay.py — Lead decay / re-scoring job.
 Downgrades a lead's tier one step if the user has shown no fresh
 behaviour_events or email opens since the lead was created / last active.
+
+Tiers and the inactivity period come from crm_settings.json
+(decay_inactive_minutes: 10 in demo mode so it can be shown, 7 days otherwise).
 """
 import os
 import sqlite3
 from dotenv import load_dotenv
 
+import settings
+
 load_dotenv()
 
 USER_DB = os.getenv("USER_DB_PATH", "../user-backend/xeducation_user.db")
-DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
+DEMO_MODE = settings.DEMO_MODE
+DECAY_INACTIVITY_MINUTES = int(settings.by_mode("decay_inactive_minutes"))
 
-# In DEMO_MODE, decay after 10 minutes of inactivity so it can be shown in a demo
-# (long enough not to demote a lead while you are still presenting it);
-# otherwise decay leads inactive for 7 days.
-DECAY_INACTIVITY_MINUTES = 10 if DEMO_MODE else 7 * 24 * 60
+_TIERS = settings.tiers()                                   # [(min_score, name), ...] highest first
+TIER_ORDER = [name for _, name in _TIERS]
+# highest score a lead may keep after being moved down into a tier
+TIER_CEILING = {name: (100.0 if i == 0 else _TIERS[i - 1][0] - 0.1) for i, (_, name) in enumerate(_TIERS)}
+LOWEST_TIER = TIER_ORDER[-1]
 
-TIER_ORDER = [
-    "Target Immediately",
-    "Nurture via Email/WhatsApp",
-    "Marketing Campaign",
-    "Low Priority",
-]
 
-TIER_CEILING = {
-    "Target Immediately": 100.0,
-    "Nurture via Email/WhatsApp": 79.9,
-    "Marketing Campaign": 59.9,
-    "Low Priority": 39.9,
-}
+def _conn():
+    c = sqlite3.connect(USER_DB, check_same_thread=False, timeout=30)
+    c.row_factory = sqlite3.Row
+    c.execute("PRAGMA busy_timeout=30000")
+    return c
+
 
 def _recompute_plv(conn, user_id, course_slug, probability):
     """PLV = money already spent + P(convert) × price of the course of interest."""
@@ -51,9 +52,10 @@ def lead_decay_job():
         ).fetchone()["c"]
 
         leads = conn.execute(
-            "SELECT * FROM leads WHERE recommended_action != 'Low Priority' AND decayed = 0 "
+            "SELECT * FROM leads WHERE recommended_action != ? AND decayed = 0 "
             "AND id IN (SELECT MAX(id) FROM leads GROUP BY user_id) "  # latest lead per user
-            "AND user_id NOT IN (SELECT user_id FROM purchases)"        # customers don't decay
+            "AND user_id NOT IN (SELECT user_id FROM purchases)",       # customers don't decay
+            (LOWEST_TIER,)
         ).fetchall()
         print(f"[DECAY JOB] Checking {len(leads)} active-tier leads")
 
@@ -94,7 +96,9 @@ def lead_decay_job():
 
         conn.commit()
         print(f"[DECAY JOB] Downgraded {downgraded} lead(s)")
+        return downgraded
     except Exception as e:
         print("[DECAY JOB ERROR]", e)
+        return 0
     finally:
         conn.close()

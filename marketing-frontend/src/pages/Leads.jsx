@@ -21,8 +21,13 @@ export default function Leads() {
   const sort = params.get('sort')
 
   useEffect(() => {
-    setLoading(true)
-    getLeads(tier, search, sort).then(r => setLeads(r.data.leads)).catch(() => []).finally(() => setLoading(false))
+    let live = true
+    const t = setTimeout(() => {          // wait until typing pauses, and ignore answers to older searches
+      setLoading(true)
+      getLeads(tier, search, sort).then(r => { if (live) setLeads(r.data.leads) }).catch(() => {})
+        .finally(() => { if (live) setLoading(false) })
+    }, search ? 300 : 0)
+    return () => { live = false; clearTimeout(t) }
   }, [tier, search, sort])
 
   return (
@@ -76,7 +81,7 @@ export default function Leads() {
                   <tr key={l.id} className="hover:bg-white/[0.02] transition-colors">
                     <td className="px-4 py-3.5">
                       <p className="font-semibold text-white">{l.name}
-                        {l.email?.endsWith('@demo.xeducation.test') && <span className="ml-2 text-[10px] font-medium px-1.5 py-0.5 rounded bg-white/10 text-slate-400 align-middle" title="Simulated demo learner (seed-demo-data.bat)">simulated</span>}
+                        {l.email?.endsWith('@demo.xeducation.test') && <span className="ml-2 text-[10px] font-medium px-1.5 py-0.5 rounded bg-white/10 text-slate-400 align-middle" title="Simulated learner from the starting history">simulated</span>}
                       </p>
                       <p className="text-slate-500 text-xs">{l.email}</p>
                     </td>

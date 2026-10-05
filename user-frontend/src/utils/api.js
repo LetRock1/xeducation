@@ -66,6 +66,7 @@ export const resendOtp      = (email) => api.post('/auth/resend-otp', { email })
 export const forgotPassword = (email) => api.post('/auth/forgot-password', { email });
 export const resetPassword  = (d) => api.post('/auth/reset-password', d);
 export const changePassword = (d) => api.post('/auth/change-password', d);
+export const deleteAccount  = () => api.delete('/me');
 export const checkCoupon    = (code) => api.post('/coupons/check', { code });
 export const sendChat       = (d) => api.post('/chat', d);
 export const requestCallback= (d) => api.post('/callback', d);
