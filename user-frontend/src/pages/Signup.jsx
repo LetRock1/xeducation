@@ -35,7 +35,9 @@ export default function Signup() {
   async function handleSignup(e) {
     e.preventDefault(); setError(''); setLoading(true)
     try {
-      await signup(form)
+      const r = await signup(form)
+      // in demo mode the server may not have reached Gmail: then it says where the code is shown
+      if (r.data?.message && !r.data.message.startsWith('OTP sent')) setInfo(r.data.message)
       setStep('otp'); setCooldown(60)
     } catch(err) { setError(err.response?.data?.detail || 'Signup failed') }
     finally { setLoading(false) }

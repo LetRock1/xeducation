@@ -274,8 +274,63 @@ def remove(db):
         finally:
             c.close()
     restore_starting_models()
+    forget_live_world()
     print(f"Removed {len(ids)} simulated learners, their history, the simulated campaigns, A/B tests and "
           f"learning runs, and restored the starting models.")
+
+
+def forget_live_world():
+    """The live simulation's own records (hidden traits, its to-do list) go with the learners."""
+    path = os.getenv("SIM_WORLD_DB", os.path.join(BACKEND, "simulation_world.db"))
+    if not os.path.exists(path):
+        return
+    c = sqlite3.connect(path, timeout=30)
+    try:
+        for t in ("learners", "effects", "tasks", "queue", "log", "meta"):
+            try:
+                c.execute(f"DELETE FROM {t}")
+            except sqlite3.OperationalError:
+                pass
+        c.commit()
+    finally:
+        c.close()
+
+
+# ── the simulated people ──────────────────────────────────────────────────────
+def course_slugs(F, catalog):
+    """The website's courses grouped by the course type the generator draws (same order every time)."""
+    by_type = {}
+    for slug, ctype in F.COURSE_TYPE_BY_SLUG.items():
+        if catalog.get_course(slug):
+            by_type.setdefault(ctype, []).append(slug)
+    return by_type, [s for v in by_type.values() for s in v]
+
+
+def learner_traits(n, days, seed, G, rng, slugs_by_type, all_slugs, action_list, noise_sd):
+    """Who the simulated learners are: profile, hidden intent and luck, how each one responds to each CRM
+    step (noise), course of interest, phone, sign-up day. The history generator and the live simulation
+    (ml/live_simulation.py) both use this, so the live learners are exactly the people of the history.
+    rng must be a fresh np.random.default_rng(seed): the draws happen in a fixed order."""
+    raw = G.generate(n, seed=seed, return_truth=True)
+    day_ix = np.arange(days)
+    p = 1 + 0.6 * day_ix / days                      # the site grows: more sign-ups recently
+    signup_days = np.sort(rng.choice(day_ix, size=n, p=p / p.sum()))
+    pairs = [(f, l) for f in FIRST for l in LAST]                # every learner gets a different name
+    order = rng.permutation(len(pairs))
+    out = []
+    for i, r in enumerate(raw.to_dict("records")):
+        first, last = pairs[int(order[i % len(pairs)])]
+        hour = float(rng.uniform(8, 22))
+        slug = str(rng.choice(slugs_by_type.get(r["CourseType"]) or all_slugs))
+        luck = float(rng.normal(0, 0.45))
+        noise = {a: float(rng.normal(0, noise_sd)) for a in action_list}
+        phone = f"+91 00000 {i + 1:05d}" if rng.random() < 0.85 else None
+        out.append({"i": i, "name": f"{first} {last}", "email": f"{first}.{last}.{i + 1}@{DEMO_DOMAIN}".lower(),
+                    "occ": r["CurrentOccupation"], "spec": r["Specialization"], "intent": float(r["_intent"]),
+                    "luck": luck, "dne": int(r["DoNotEmail"]), "dnc": int(r["DoNotCall"]), "wa": int(r["WhatsAppOptIn"]),
+                    "device": r["DeviceType"], "source": r["LeadSource"], "slug": slug, "signup_day": int(signup_days[i]),
+                    "signup_hour": hour, "noise": noise, "phone": phone, "raw": r})
+    return out
 
 
 # ── the simulation ────────────────────────────────────────────────────────────
@@ -317,11 +372,7 @@ class History:
         self.calls_today = {}
         self.stats = {k: 0 for k in ("visits", "decisions", "explore", "emails", "clicks", "calls", "whatsapp",
                                      "purchases", "campaign_emails", "ab_people", "runs", "lead_swaps", "nba_swaps")}
-        self.slugs_by_type = {}
-        for slug, ctype in F.COURSE_TYPE_BY_SLUG.items():
-            if catalog.get_course(slug):
-                self.slugs_by_type.setdefault(ctype, []).append(slug)
-        self.all_slugs = [s for v in self.slugs_by_type.values() for s in v]
+        self.slugs_by_type, self.all_slugs = course_slugs(F, catalog)
 
     # ── helpers ──
     def say(self, *a):
@@ -340,27 +391,19 @@ class History:
 
     # ── learners ──
     def create_learners(self):
-        raw = self.G.generate(self.n, seed=self.seed, return_truth=True)
-        days = np.arange(self.days)
-        p = 1 + 0.6 * days / self.days                  # the site grows: more sign-ups recently
-        signup_days = np.sort(self.rng.choice(days, size=self.n, p=p / p.sum()))
+        traits = learner_traits(self.n, self.days, self.seed, self.G, self.rng, self.slugs_by_type, self.all_slugs,
+                                self.N.ACTION_LIST, self.S.EFFECT_NOISE_SD)
         self.learners = []
-        pairs = [(f, l) for f in FIRST for l in LAST]                # every learner gets a different name
-        order = self.rng.permutation(len(pairs))
-        for i, r in enumerate(raw.to_dict("records")):
-            first, last = pairs[int(order[i % len(pairs)])]
-            d = int(signup_days[i])
-            t = self.start + timedelta(days=d, hours=float(self.rng.uniform(8, 22)))
-            slug = str(self.rng.choice(self.slugs_by_type.get(r["CourseType"]) or self.all_slugs))
-            L = {"i": i, "name": f"{first} {last}", "email": f"{first}.{last}.{i + 1}@{DEMO_DOMAIN}".lower(),
-                 "occ": r["CurrentOccupation"], "spec": r["Specialization"], "intent": float(r["_intent"]),
-                 "luck": float(self.rng.normal(0, 0.45)), "dne": int(r["DoNotEmail"]), "dnc": int(r["DoNotCall"]),
-                 "wa": int(r["WhatsAppOptIn"]), "device": r["DeviceType"], "source": r["LeadSource"],
-                 "slug": slug, "signup_day": d, "signup_at": t, "visits": 0, "time": 0, "pv": 0, "clicks": 0,
-                 "flags": {f: 0 for f, *_ in EVENTS} | {"checkout": 0}, "last_visit_day": d, "boost": 0.0,
+        for tr in traits:
+            r = tr["raw"]
+            t = self.start + timedelta(days=tr["signup_day"], hours=tr["signup_hour"])
+            L = {"i": tr["i"], "name": tr["name"], "email": tr["email"], "occ": tr["occ"], "spec": tr["spec"],
+                 "intent": tr["intent"], "luck": tr["luck"], "dne": tr["dne"], "dnc": tr["dnc"], "wa": tr["wa"],
+                 "device": tr["device"], "source": tr["source"], "slug": tr["slug"], "signup_day": tr["signup_day"],
+                 "signup_at": t, "visits": 0, "time": 0, "pv": 0, "clicks": 0,
+                 "flags": {f: 0 for f, *_ in EVENTS} | {"checkout": 0}, "last_visit_day": tr["signup_day"], "boost": 0.0,
                  "boost_day": -1, "effects": [], "bought": False, "touch": {}, "wish_reminded": False,
-                 "noise": {a: float(self.rng.normal(0, self.S.EFFECT_NOISE_SD)) for a in self.N.ACTION_LIST},
-                 "phone": (f"+91 00000 {i + 1:05d}" if self.rng.random() < 0.85 else None)}
+                 "noise": tr["noise"], "phone": tr["phone"]}
             L["uid"] = self.ex("INSERT INTO users (name, email, password_hash, is_verified, created_at) VALUES (?,?,?,1,?)",
                                (L["name"], L["email"], "!demo-" + uuid.uuid4().hex, ts(t)))
             has_profile = r["CurrentOccupation"] != "Unknown"

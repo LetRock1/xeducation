@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link }                from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts'
-import { getStats, exportCsv, getCampaignInfluence, getModelHealth, getNbaPerformance, runAutomations, getForecast } from '../utils/api'
+import { getStats, exportCsv, getCampaignInfluence, getModelHealth, getNbaPerformance, runAutomations, getForecast,
+         getSimulation, simulationVisit, setSimulation } from '../utils/api'
+import { actionLabel, ago } from '../utils/labels'
 
 const TIER_COLORS = {
   'Target Immediately':'#f97316',
@@ -10,6 +12,82 @@ const TIER_COLORS = {
   'Low Priority':'#64748b',
 }
 const SCORE_COLORS = ['#64748b','#3b82f6','#f59e0b','#f97316','#ef4444']
+
+// One pool of learners. Simulated learners (…@demo.xeducation.test) keep using the website in real time
+// (ml/live_simulation.py): this card shows what they did lately and can send one to the website now.
+function LearnersCard({ stats, onChange }) {
+  const [sim, setSim] = useState(null)
+  const [simErr, setSimErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null)
+  const load = () => getSimulation().then(r => { setSim(r.data); setSimErr('') })
+    .catch(e => setSimErr(e.response?.data?.detail || 'The user backend did not answer.'))
+  useEffect(() => { load(); const t = setInterval(load, 10000); return () => clearInterval(t) }, [])
+
+  async function sendOne(kind) {
+    setBusy(true); setResult(null)
+    try { const r = await simulationVisit(kind); setResult({ ok: true, ...r.data }); load() }
+    catch (e) { setResult({ ok: false, message: e.response?.data?.detail || 'Could not send a learner.' }) }
+    finally { setBusy(false) }
+  }
+  async function toggle() {
+    setBusy(true)
+    try { const r = await setSimulation(!sim?.enabled); setSim(r.data) } catch { /* shown by the next load */ }
+    finally { setBusy(false) }
+  }
+
+  const people = stats.total_users ?? 0
+  const simPeople = stats.simulated_people ?? stats.demo_users ?? 0
+  const day = sim?.last_24h || {}
+  return (
+    <div className="card p-5 mb-6 border-sky-accent/30">
+      <div className="flex flex-wrap items-start gap-x-10 gap-y-3">
+        <div>
+          <p className="text-slate-500 text-[11px] uppercase tracking-wide">Learners</p>
+          <p className="text-white font-display text-2xl font-bold">{people.toLocaleString()}
+            <span className="text-slate-400 text-sm font-normal"> · {(stats.customers ?? 0).toLocaleString()} customers · ₹{Math.round(stats.revenue || 0).toLocaleString('en-IN')} paid</span></p>
+          <p className="text-slate-500 text-xs mt-0.5">{(stats.real_people ?? 0).toLocaleString()} signed up themselves ({stats.real_customers ?? 0} bought) · {simPeople.toLocaleString()} simulated ({(stats.simulated_customers ?? 0).toLocaleString()} bought)</p>
+        </div>
+        <div className="flex-1 min-w-[300px]">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-slate-500 text-[11px] uppercase tracking-wide">Simulated learners, live</p>
+            {sim && (sim.enabled
+              ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-300">● using the website now{sim.learners?.on_site_now ? ` · ${sim.learners.on_site_now} on the site` : ''}</span>
+              : <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300">paused</span>)}
+            {simErr && <span className="text-[10px] text-red-400">{simErr}</span>}
+          </div>
+          {sim && <>
+            <p className="text-slate-300 text-sm mt-1">Last 24 h: {day.visits ?? 0} visits · {day.email_clicks ?? 0} e-mail clicks · {day.purchases ?? 0} purchases · {day.signups ?? 0} new sign-ups · {day.advisor_tasks ?? 0} calls/WhatsApps by the simulated advisor</p>
+            <p className="text-slate-500 text-xs mt-0.5">At this moment {sim.learners?.still_deciding ?? 0} of them are still deciding; expected per day ≈ {Math.round(sim.expected_per_day?.visits || 0)} return visits, {Math.round(sim.expected_per_day?.purchases || 0)} purchases, {Math.round(sim.expected_per_day?.signups || 0)} sign-ups (plus visits after e-mail clicks and calls).
+              {sim.last_error && <span className="text-amber-300"> {sim.last_error}</span>}</p>
+          </>}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => sendOne('returning')} disabled={busy || !sim?.enabled} className="btn text-xs py-2 px-3 disabled:opacity-50"
+            title="One simulated learner who is still deciding comes back to the website now (picked with their own chance of coming back). What they do there is drawn as for any visit.">▶ Send a learner to the website now</button>
+          <button onClick={() => sendOne('signup')} disabled={busy || !sim?.enabled} className="text-xs border border-white/15 text-slate-300 rounded-lg px-3 py-2 hover:border-white/40 disabled:opacity-50"
+            title="A new simulated person signs up now: sign-up, e-mailed code, profile, first visit">+ New sign-up now</button>
+          {sim && <button onClick={toggle} disabled={busy} className="text-xs border border-white/15 text-slate-400 rounded-lg px-3 py-2 hover:border-white/40">{sim.enabled ? 'Pause' : 'Resume'}</button>}
+        </div>
+      </div>
+      {result && (
+        <p className={`text-sm mt-3 ${result.ok ? 'text-sky-accent' : 'text-red-400'}`}>{result.message}
+          {result.ok && result.lead_id && <> <Link to={`/leads/${result.lead_id}`} className="underline">Open their lead page →</Link></>}</p>
+      )}
+      {sim?.recent?.length > 0 && (
+        <ul className="mt-3 grid md:grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-400">
+          {sim.recent.slice(0, 8).map((r, i) => (
+            <li key={i} className="truncate" title={r.text}><span className="text-slate-600">{ago(r.at)} · </span>{r.text}</li>
+          ))}
+        </ul>
+      )}
+      <p className="text-[11px] text-slate-500 mt-3">One pool: the CRM scores, decides and learns for everyone the same way. Simulated learners use the website through
+        the same API as a browser and follow a documented simulator (behaviour, reactions to e-mails, coupons and calls, buying); their
+        e-mails are recorded but never delivered and their phone numbers are not real, so a simulated advisor handles their calls. They carry a
+        small “simulated” tag everywhere.</p>
+    </div>
+  )
+}
 
 export default function Dashboard() {
   const [stats,   setStats]   = useState(null)
@@ -81,14 +159,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {stats.demo_users > 0 && (
-        <div className="card p-4 mb-6 text-xs text-slate-400 border-sky-accent/30">
-          Includes the starting history: <span className="text-white font-semibold">{stats.demo_users} simulated learners</span> over
-          six months (emails ending @demo.xeducation.test, marked “simulated” in Leads). Their behaviour and purchases come from
-          the simulator, so these numbers show how the system works, not real customer results; real sign-ups are added on top.
-          To delete it: <span className="font-mono">python ml/generate_history.py --remove</span>.
-        </div>
-      )}
+      <LearnersCard stats={stats} onChange={loadAll} />
 
       {runResult && (
         <div className={`card p-4 mb-6 text-sm ${runResult.ok ? 'text-slate-300' : 'text-red-400'}`}>
@@ -186,7 +257,7 @@ export default function Dashboard() {
               <table className="w-full">
                 <thead><tr className="text-slate-500 text-left"><th className="py-1 font-medium">Action</th><th className="font-medium">Decisions</th><th className="font-medium">Random (learning)</th><th className="font-medium">Bought</th></tr></thead>
                 <tbody>{Object.entries(nbaPerf.by_action).map(([a, v]) => (
-                  <tr key={a} className="border-t border-white/5 text-slate-300"><td className="py-1.5">{a}</td><td>{v.decisions}</td><td>{v.explore}</td><td>{v.converted}/{v.known_outcome}</td></tr>
+                  <tr key={a} className="border-t border-white/5 text-slate-300"><td className="py-1.5">{actionLabel(a)}</td><td>{v.decisions}</td><td>{v.explore}</td><td>{v.converted}/{v.known_outcome}</td></tr>
                 ))}</tbody>
               </table>
               <div>
@@ -212,8 +283,8 @@ export default function Dashboard() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {[
-          { label:'People (leads)',  value: stats.total_leads,     icon:'👥', color:'text-white' },
-          { label:'Avg Lead Score',  value: `${stats.avg_lead_score}/100`, icon:'⭐', color:'text-ember' },
+          { label:'People · customers', value: `${stats.total_leads} · ${stats.customers ?? 0}`, icon:'👥', color:'text-white' },
+          { label:'Avg score (not bought yet)', value: `${stats.avg_lead_score}/100`, icon:'⭐', color:'text-ember' },
           { label:'Emails sent · clicked', value: `${stats.emails_sent} · ${stats.email_clicks ?? 0}`, icon:'✉️', color:'text-sky-accent' },
           { label:'Active Carts',    value: stats.active_carts,    icon:'🛒', color:'text-gold' },
           { label:'Open callbacks',  value: stats.open_callbacks ?? 0, icon:'📞', color:'text-sky-accent' },

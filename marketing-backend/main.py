@@ -7,7 +7,9 @@ small database.
 
 Background jobs (started on boot):
   * every minute  — send campaigns whose scheduled time has come
-  * every 5 min   — lead decay (decay.py)
+  * every 5 min   — adopted A/B winners re-checked against the old email
+(Scores are kept current by the user backend: every lead is re-scored by the model, including how long
+they have been away, at start-up, every few minutes and after every model switch.)
 """
 import csv
 import io
@@ -49,10 +51,15 @@ JWT_SECRET = os.getenv("JWT_SECRET", "mkt_secret")
 JWT_ALGO = "HS256"
 TOKEN_HOURS = 12
 
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8001")
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://127.0.0.1:8001")
 USER_FRONTEND_URL = os.getenv("USER_FRONTEND_URL", "http://localhost:5173")
+# where the links in emails point (see user-backend/outreach.py): a phone can only open them if this is the
+# laptop's Wi-Fi address, e.g. PUBLIC_SITE_URL=http://192.168.1.5:5173; otherwise they work on this laptop
+SITE_URL = (os.getenv("PUBLIC_SITE_URL") or USER_FRONTEND_URL).rstrip("/")
 DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
-USER_BACKEND_URL = os.getenv("USER_BACKEND_URL", "http://localhost:8000")
+# Server-to-server calls go to 127.0.0.1: on Windows "localhost" is tried as IPv6 first, which costs about
+# 2 seconds per new connection when the server listens on 127.0.0.1 (measured on the laptop).
+USER_BACKEND_URL = os.getenv("USER_BACKEND_URL", "http://127.0.0.1:8000").replace("//localhost", "//127.0.0.1")
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "xedu-internal-dev")
 MODEL_CARD_PATH = os.getenv("MODEL_CARD_PATH", os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "user-backend", "ml_models", "model_card.json"))
@@ -64,6 +71,24 @@ ACTION_DISCOUNT = {k: float(v.get("discount", 0)) for k, v in settings.S["action
 # One row per person: a user gets a new lead row for every enquiry / abandonment,
 # so lists, stats, campaigns and A/B tests work on each user's LATEST lead.
 LATEST = "(SELECT * FROM leads WHERE id IN (SELECT MAX(id) FROM leads GROUP BY user_id))"
+# Simulated learners (the starting history, ml/generate_history.py, and the live simulation,
+# ml/live_simulation.py) use this reserved e-mail domain. They are part of the one pool of learners;
+# the dashboard only tags them "simulated" and lets you filter.
+DEMO_DOMAIN = "@demo.xeducation.test"
+CUSTOMERS = "(SELECT DISTINCT user_id FROM purchases)"
+
+
+def is_simulated(email):
+    return (email or "").lower().endswith(DEMO_DOMAIN)
+
+
+def segment_sql(segment, col="u.email"):
+    """'all' (default): everyone; 'real': people who signed up themselves; 'simulated': simulated learners."""
+    if segment == "simulated":
+        return f" AND {col} LIKE '%{DEMO_DOMAIN}'"
+    if segment == "real":
+        return f" AND {col} NOT LIKE '%{DEMO_DOMAIN}'"
+    return ""
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -141,11 +166,15 @@ def request_rescore(user_id: int, reason: str):
         return None
 
 
-def internal(path, method="GET", timeout=60):
-    """Call the user-backend's internal API (learning loop, what-if paths, journeys)."""
+def internal(path, method="GET", timeout=60, body=None):
+    """Call the user-backend's internal API (learning loop, what-if paths, journeys, simulated learners)."""
     import urllib.error
     import urllib.request
-    req = urllib.request.Request(f"{USER_BACKEND_URL}{path}", method=method, headers={"X-Internal-Key": INTERNAL_API_KEY})
+    headers = {"X-Internal-Key": INTERNAL_API_KEY}
+    data = None
+    if body is not None:
+        data, headers["Content-Type"] = json.dumps(body).encode(), "application/json"
+    req = urllib.request.Request(f"{USER_BACKEND_URL}{path}", method=method, headers=headers, data=data)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode())
@@ -200,14 +229,14 @@ app.add_middleware(CORSMiddleware,
 def startup():
     init_mkt_db()
     from apscheduler.schedulers.background import BackgroundScheduler
-    from decay import lead_decay_job
     sched = BackgroundScheduler(timezone="Asia/Kolkata",
                                 job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 300})
-    sched.add_job(lead_decay_job, "interval", minutes=5)
+    # (no "lead decay" job any more: the user backend re-scores every lead with the model, including how
+    #  long they have been away, at start-up, every few minutes and after every model switch)
     sched.add_job(run_due_campaigns, "interval", minutes=1)
     sched.add_job(adoption_job, "interval", minutes=5)
     sched.start()
-    print("[SCHEDULER] Lead decay (5 min), campaign sender (1 min) and A/B adoption checks (5 min) started")
+    print("[SCHEDULER] Campaign sender (1 min) and A/B adoption checks (5 min) started")
     print("[API] Marketing Backend running on port 8001")
 
 
@@ -238,7 +267,7 @@ def mkt_auth(authorization: str = Header(None)):
 
 # ── Outreach helpers ──────────────────────────────────────────────────────────
 def _course_url(slug):
-    return f"{USER_FRONTEND_URL}/courses/{slug}" if catalog.get_course(slug) else f"{USER_FRONTEND_URL}/courses"
+    return f"{SITE_URL}/courses/{slug}" if catalog.get_course(slug) else f"{SITE_URL}/courses"
 
 
 def _lead_slug(lead):
@@ -261,8 +290,9 @@ def tracked_send(user_id, email, subject, body, course_slug=None, lead_id=None,
     uex("""INSERT INTO email_sends (lead_id, user_id, campaign_id, campaign_name, ab_test_id, variant, token, subject, body)
            VALUES (?,?,?,?,?,?,?,?,?)""",
         (lead_id, user_id, campaign_id, campaign_name, ab_test_id, variant, token, subject, body))
-    click = f"{PUBLIC_BASE_URL}/api/mkt/track/click/{token}?to={quote(_course_url(course_slug), safe='')}"
-    unsub = f"{PUBLIC_BASE_URL}/api/mkt/unsubscribe/{token}"
+    # the button opens the course page itself; the page reports the click (user-backend /api/email/click)
+    click = f"{_course_url(course_slug)}?ref={token}"
+    unsub = f"{SITE_URL}/unsubscribe?t={token}"
     ok, msg = send_marketing_email(email, subject, body, cta_url=click, unsubscribe_url=unsub)
     if ok and lead_id:
         uex("UPDATE leads SET email_sent=1, email_sent_at=datetime('now','localtime') WHERE id=?", (lead_id,))
@@ -359,15 +389,24 @@ def pipeline_forecast(_=Depends(mkt_auth)):
 # ── STATS ─────────────────────────────────────────────────────────────────────
 @app.get("/api/mkt/stats")
 def stats(_=Depends(mkt_auth)):
+    # tiers and scores are about people who have not bought yet; customers are counted on their own
+    OPEN = f"{LATEST} l WHERE l.user_id NOT IN {CUSTOMERS}"
     by_tier = {r["recommended_action"]: r["cnt"] for r in
-               uq(f"SELECT recommended_action, COUNT(*) AS cnt FROM {LATEST} GROUP BY recommended_action")}
+               uq(f"SELECT l.recommended_action, COUNT(*) AS cnt FROM {OPEN} GROUP BY l.recommended_action")}
     buckets = [("0-20", 0, 20), ("20-40", 20, 40), ("40-60", 40, 60), ("60-80", 60, 80), ("80-100", 80, 101)]
-    dist = {name: uq1(f"SELECT COUNT(*) AS c FROM {LATEST} WHERE lead_score>=? AND lead_score<?", (lo, hi))["c"]
+    dist = {name: uq1(f"SELECT COUNT(*) AS c FROM {OPEN} AND l.lead_score>=? AND l.lead_score<?", (lo, hi))["c"]
             for name, lo, hi in buckets}
+    real = f"(SELECT id FROM users WHERE email NOT LIKE '%{DEMO_DOMAIN}')"
     return {
         "total_leads": uq1(f"SELECT COUNT(*) AS c FROM {LATEST}")["c"],
+        "open_leads": uq1(f"SELECT COUNT(*) AS c FROM {OPEN}")["c"],
+        "customers": uq1(f"SELECT COUNT(*) AS c FROM {CUSTOMERS}")["c"],
+        "real_people": uq1(f"SELECT COUNT(*) AS c FROM users WHERE is_verified=1 AND id IN {real}")["c"],
+        "real_customers": uq1(f"SELECT COUNT(DISTINCT user_id) AS c FROM purchases WHERE user_id IN {real}")["c"],
+        "real_purchases": uq1(f"SELECT COUNT(*) AS c FROM purchases WHERE user_id IN {real}")["c"],
+        "real_revenue": uq1(f"SELECT COALESCE(SUM(price_paid),0) AS r FROM purchases WHERE user_id IN {real}")["r"],
         "by_tier": by_tier,
-        "avg_lead_score": uq1(f"SELECT ROUND(AVG(lead_score),1) AS a FROM {LATEST}")["a"] or 0,
+        "avg_lead_score": uq1(f"SELECT ROUND(AVG(l.lead_score),1) AS a FROM {OPEN}")["a"] or 0,
         "total_users": uq1("SELECT COUNT(*) AS c FROM users WHERE is_verified=1")["c"],
         "total_purchases": uq1("SELECT COUNT(*) AS c FROM purchases")["c"],
         "revenue": uq1("SELECT COALESCE(SUM(price_paid),0) AS r FROM purchases")["r"],
@@ -376,6 +415,9 @@ def stats(_=Depends(mkt_auth)):
         "email_clicks": uq1("SELECT COUNT(*) AS c FROM email_sends WHERE click_count > 0")["c"],
         "open_callbacks": uq1("SELECT COUNT(*) AS c FROM callback_requests WHERE status='open'")["c"],
         "demo_users": uq1("SELECT COUNT(*) AS c FROM users WHERE email LIKE '%@demo.xeducation.test'")["c"],
+        "simulated_people": uq1(f"SELECT COUNT(*) AS c FROM users WHERE is_verified=1 AND email LIKE '%{DEMO_DOMAIN}'")["c"],
+        "simulated_customers": uq1(f"""SELECT COUNT(DISTINCT p.user_id) AS c FROM purchases p JOIN users u ON u.id=p.user_id
+                                       WHERE u.email LIKE '%{DEMO_DOMAIN}'""")["c"],
         "score_distribution": dist,
     }
 
@@ -383,7 +425,7 @@ def stats(_=Depends(mkt_auth)):
 # ── LEADS (one row per person) ────────────────────────────────────────────────
 @app.get("/api/mkt/leads")
 def get_leads(tier: Optional[str] = None, search: Optional[str] = None, sort: Optional[str] = None,
-              _=Depends(mkt_auth)):
+              segment: str = "all", limit: int = 300, _=Depends(mkt_auth)):
     # Only the columns the Leads page shows (the e-mail drafts and model JSON stay on the lead page):
     # with thousands of people the full rows were megabytes and took seconds.
     sql = f"""
@@ -392,24 +434,37 @@ def get_leads(tier: Optional[str] = None, search: Optional[str] = None, sort: Op
                l.created_at, l.last_active_at, l.nba_action, l.model_version,
                u.name, u.email, up.phone, up.whatsapp_opt_in, up.do_not_email, up.do_not_call,
                up.current_occupation, up.specialization, up.city,
-               COALESCE(t.n, 0) AS touches, COALESCE(p.n, 0) AS purchases, COALESCE(cb.n, 0) AS open_callbacks
+               COALESCE(t.n, 0) AS touches, COALESCE(p.n, 0) AS purchases, COALESCE(p.spent, 0) AS spent,
+               p.first_course, p.first_purchase_at, COALESCE(cb.n, 0) AS open_callbacks
         FROM {LATEST} l
         JOIN users u ON l.user_id=u.id
         LEFT JOIN user_profiles up ON up.user_id=l.user_id
         LEFT JOIN (SELECT user_id, COUNT(*) AS n FROM leads GROUP BY user_id) t ON t.user_id=l.user_id
-        LEFT JOIN (SELECT user_id, COUNT(*) AS n FROM purchases GROUP BY user_id) p ON p.user_id=l.user_id
+        LEFT JOIN (SELECT user_id, COUNT(*) AS n, SUM(price_paid) AS spent, MIN(purchased_at) AS first_purchase_at,
+                          MIN(course_title) AS first_course FROM purchases GROUP BY user_id) p ON p.user_id=l.user_id
         LEFT JOIN (SELECT user_id, COUNT(*) AS n FROM callback_requests WHERE status='open' GROUP BY user_id) cb
                ON cb.user_id=l.user_id
-        WHERE 1=1"""
+        WHERE 1=1""" + segment_sql(segment)
     params = []
-    if tier:
-        sql += " AND l.recommended_action=?"
+    if tier == "Customers":
+        sql += f" AND l.user_id IN {CUSTOMERS}"
+    elif tier:
+        sql += f" AND l.recommended_action=? AND l.user_id NOT IN {CUSTOMERS}"
         params.append(tier)
     if search:
         sql += " AND (u.name LIKE ? OR u.email LIKE ? OR l.course_type LIKE ?)"
         params += [f"%{search}%"] * 3
-    sql += {"plv": " ORDER BY l.plv DESC", "score": " ORDER BY l.lead_score DESC"}.get(sort, " ORDER BY l.created_at DESC")
-    return {"leads": uq(sql, params)}
+    matching = uq1(f"SELECT COUNT(*) AS c FROM ({sql})", params)["c"]
+    sql += {"plv": " ORDER BY l.plv DESC", "score": " ORDER BY (p.n IS NOT NULL), l.lead_score DESC"}.get(
+        sort, " ORDER BY l.created_at DESC, l.id DESC")
+    sql += f" LIMIT {max(1, min(int(limit), 5000))}"
+    rows = uq(sql, params)
+    for r in rows:
+        r["simulated"] = is_simulated(r["email"])
+        r["customer"] = bool(r["purchases"])
+    counts = {seg: uq1(f"SELECT COUNT(*) AS c FROM {LATEST} l JOIN users u ON u.id=l.user_id WHERE 1=1"
+                       + segment_sql(seg))["c"] for seg in ("all", "real", "simulated")}
+    return {"leads": rows, "segment": segment, "counts": counts, "matching": matching}
 
 
 @app.get("/api/mkt/priority-queue")
@@ -430,14 +485,20 @@ def priority_queue(limit: int = 20, _=Depends(mkt_auth)):
 
 @app.get("/api/mkt/leads/{lead_id}")
 def get_lead(lead_id: int, _=Depends(mkt_auth)):
+    """The person's page. Any of their contact records opens their CURRENT state (the latest record, which
+    the user backend keeps re-scored); older records are only listed as touchpoints with their score then."""
+    owner = uq1("SELECT user_id FROM leads WHERE id=?", (lead_id,))
+    if not owner:
+        raise HTTPException(404, "Lead not found")
     lead = uq1("""
         SELECT l.*, u.name, u.email, up.phone, up.whatsapp_opt_in, up.do_not_email, up.do_not_call,
                up.current_occupation, up.specialization, up.city, up.age_bracket
         FROM leads l JOIN users u ON l.user_id=u.id
         LEFT JOIN user_profiles up ON up.user_id=l.user_id
-        WHERE l.id=?""", (lead_id,))
+        WHERE l.id=(SELECT MAX(id) FROM leads WHERE user_id=?)""", (owner["user_id"],))
     if not lead:
         raise HTTPException(404, "Lead not found")
+    lead["opened_record"] = lead_id
     uid = lead["user_id"]
     lead["course_slug"] = _lead_slug(lead)
     lead["behaviour_events"] = uq("SELECT * FROM behaviour_events WHERE user_id=? ORDER BY id DESC LIMIT 30", (uid,))
@@ -467,7 +528,146 @@ def get_lead(lead_id: int, _=Depends(mkt_auth)):
                            "why": f"Decided at the '{latest['trigger_reason']}' trigger.",
                            "detail": f"model {latest['model_version']}",
                            "options": json.loads(latest["options_json"] or "[]")}
+    lead["simulated"] = is_simulated(lead.get("email"))
+    lead["customer"] = bool(lead["purchases"])
+    lead["spent"] = round(sum(p.get("price_paid") or 0 for p in lead["purchases"]), 2)
+    lead["latest_lead_id"] = (uq1("SELECT MAX(id) AS m FROM leads WHERE user_id=?", (uid,)) or {}).get("m")
+    lead["decisions"] = decision_history(uid)
     return lead
+
+
+ACTION_LABEL = {k: v.get("label", k) for k, v in settings.S["actions"].items()}
+POLICY_TEXT = {"model": "chosen by the model", "explore": "random pick (15% learning sample)",
+               "holdout": "control group: decided for the record, nothing sent", "manual": "chosen by hand (Do it now)",
+               "experiment": "campaign / A-B test"}
+
+
+def _ts(v):
+    try:
+        return datetime.strptime(str(v)[:19], "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return None
+
+
+def decision_history(uid, limit=20):
+    """Every step the CRM took (or decided not to take) for this person, with its receipt and what happened
+    afterwards: email sent and clicked, call outcome, next visit, bought within the outcome window."""
+    window = timedelta(days=CONVERSION_WINDOW_DAYS)
+    now = datetime.now()
+    decs = uq("""SELECT id, lead_id, created_at, trigger_reason, action, model_best, policy, propensity,
+                        base_probability, price, options_json, model_version, executed_at
+                 FROM nba_decisions WHERE user_id=? ORDER BY id DESC LIMIT ?""", (uid, int(limit)))
+    emails = uq("""SELECT lead_id, campaign_id, ab_test_id, subject, sent_at, first_clicked_at, click_count
+                   FROM email_sends WHERE user_id=? ORDER BY id""", (uid,))
+    by_lead = {}
+    for e in emails:
+        if e["lead_id"] and not e["campaign_id"] and not e["ab_test_id"]:
+            by_lead.setdefault(e["lead_id"], e)
+    tasks = {t["decision_id"]: t for t in uq("""SELECT decision_id, task_type, status, outcome, done_at
+                                                FROM sales_tasks WHERE user_id=? AND decision_id IS NOT NULL""", (uid,))}
+    events = [_ts(r["created_at"]) for r in uq("SELECT created_at FROM behaviour_events WHERE user_id=? ORDER BY created_at",
+                                                (uid,))]
+    events = [e for e in events if e]
+    buys = [(_ts(r["purchased_at"]), r) for r in uq("""SELECT course_title, purchased_at, price_paid FROM purchases
+                                                       WHERE user_id=? ORDER BY purchased_at""", (uid,))]
+
+    def after(t, email=None):
+        out = {}
+        if email:
+            out["email"] = {"subject": email["subject"], "sent_at": email["sent_at"],
+                            "clicked_at": email["first_clicked_at"], "clicks": email["click_count"] or 0}
+        nxt = next((e for e in events if e > t + timedelta(minutes=2)), None)
+        out["next_visit"] = nxt.strftime("%Y-%m-%d %H:%M:%S") if nxt and nxt <= t + window else None
+        b = next((r for bt, r in buys if bt and t <= bt <= t + window), None)
+        if b:
+            out["outcome"] = "bought"
+            out["bought"] = {"course": b["course_title"], "at": b["purchased_at"], "paid": b["price_paid"]}
+        elif now >= t + window:
+            out["outcome"] = "did_not_buy"
+        else:
+            out["outcome"] = "waiting"
+            out["days_left"] = max(0, (t + window - now).days)
+        return out
+
+    adopted = {}
+    for a in uq("""SELECT x.lead_id, x.arm, e.variant_label, e.test_name FROM experiment_assignments x
+                   JOIN adopted_emails e ON e.id = x.experiment_id
+                   WHERE x.user_id=? AND x.experiment_type='adoption'""", (uid,)):
+        adopted[a["lead_id"]] = a
+    items = []
+    for d in decs:
+        t = _ts(d["created_at"])
+        if not t:
+            continue
+        try:
+            options = json.loads(d["options_json"] or "[]")
+        except ValueError:
+            options = []
+        task = tasks.get(d["id"])
+        items.append({"kind": "decision", "id": d["id"], "at": d["created_at"], "trigger": d["trigger_reason"],
+                      "action": d["action"], "label": ACTION_LABEL.get(d["action"], d["action"]),
+                      "model_best": d["model_best"], "model_best_label": ACTION_LABEL.get(d["model_best"], d["model_best"]),
+                      "policy": d["policy"], "policy_text": POLICY_TEXT.get(d["policy"] or "model", d["policy"]),
+                      "propensity": d["propensity"], "base_probability": d["base_probability"], "price": d["price"],
+                      "model_version": d["model_version"], "options": options,
+                      "task": {"type": task["task_type"], "status": task["status"], "outcome": task["outcome"],
+                               "done_at": task["done_at"]} if task else None,
+                      "adopted_email": ({"arm": adopted[d["lead_id"]]["arm"],
+                                         "variant": adopted[d["lead_id"]]["variant_label"],
+                                         "test": adopted[d["lead_id"]]["test_name"]} if d["lead_id"] in adopted else None),
+                      **after(t, by_lead.get(d["lead_id"]))})
+    names = {("campaign", c["id"]): c["name"] for c in mq("SELECT id, name FROM campaign_schedules")}
+    names.update({("ab", a["id"]): a["name"] for a in mq("SELECT id, name FROM ab_tests")})
+    for a in uq("""SELECT experiment_type, experiment_id, arm, probability, assigned_at FROM experiment_assignments
+                   WHERE user_id=? AND experiment_type IN ('campaign', 'ab') ORDER BY assigned_at DESC LIMIT 10""", (uid,)):
+        t = _ts(a["assigned_at"])
+        if not t:
+            continue
+        sent = a["arm"] not in ("control", "holdout")
+        mail = next((e for e in emails if (e["campaign_id"] if a["experiment_type"] == "campaign" else e["ab_test_id"])
+                     == a["experiment_id"]), None) if sent else None
+        items.append({"kind": a["experiment_type"], "at": a["assigned_at"],
+                      "name": names.get((a["experiment_type"], a["experiment_id"]), f"#{a['experiment_id']}"),
+                      "arm": a["arm"], "sent": sent, "probability": a["probability"], **after(t, mail)})
+    items.sort(key=lambda x: x["at"] or "", reverse=True)
+    return items
+
+
+@app.get("/api/mkt/leads/{lead_id}/now")
+def lead_now(lead_id: int, _=Depends(mkt_auth)):
+    """What the CRM would do for this person right now (same calculation as its automatic decisions)."""
+    lead = uq1("SELECT user_id FROM leads WHERE id=?", (lead_id,))
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    return internal(f"/api/internal/lead/{lead['user_id']}/now", timeout=30)
+
+
+class ActReq(BaseModel):
+    action: str
+
+
+@app.post("/api/mkt/leads/{lead_id}/act")
+def lead_act(lead_id: int, req: ActReq, _=Depends(mkt_auth)):
+    """'Do it now': carry out one step for this person (logged as a decision, like an automatic one)."""
+    lead = uq1("SELECT user_id FROM leads WHERE id=?", (lead_id,))
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    import urllib.error
+    import urllib.request
+    req2 = urllib.request.Request(f"{USER_BACKEND_URL}/api/internal/lead/{lead['user_id']}/act", method="POST",
+                                  data=json.dumps({"action": req.action}).encode(),
+                                  headers={"X-Internal-Key": INTERNAL_API_KEY, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req2, timeout=60) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read().decode()).get("detail")
+        except Exception:
+            detail = None
+        raise HTTPException(e.code, detail or "The user backend refused.")
+    except Exception:
+        raise HTTPException(503, "User backend unreachable — is it running on port 8000?")
 
 
 # ── ATTRIBUTION ───────────────────────────────────────────────────────────────
@@ -532,11 +732,19 @@ def explain_lead_score(lead_id: int, _=Depends(mkt_auth)):
         factors = json.loads(lead.get("score_factors") or "[]") or []
     except ValueError:
         factors = []
-    note = None if factors else ("This lead was scored before explanations were stored. "
-                                 "Click “Re-score now” to compute them with the current model.")
-    return {"lead_id": lead_id, "lead_score": lead["lead_score"],
-            "recommended_action": lead["recommended_action"],
-            "model_version": lead.get("model_version"), "factors": factors, "note": note}
+    score, version, note = lead["lead_score"], lead.get("model_version"), None
+    try:                                  # fresh reasons from the current model (nothing to press)
+        now = internal(f"/api/internal/lead/{lead['user_id']}/now", timeout=20)
+        if now.get("recommendation") is None:          # a customer: the score is not about them any more
+            factors, note = [], now.get("message")
+        elif now.get("factors"):
+            factors, score, version = now["factors"], now.get("score", score), now.get("lead_model") or version
+    except HTTPException:
+        note = "The user backend is not reachable: showing the reasons saved at the last scoring."
+    if not factors and not note:
+        note = "No reasons yet: the person has not done anything on the site."
+    return {"lead_id": lead_id, "lead_score": score, "recommended_action": lead["recommended_action"],
+            "model_version": version, "factors": factors, "note": note}
 
 
 @app.post("/api/mkt/leads/{lead_id}/rescore")
@@ -609,13 +817,14 @@ def send_email_to_lead(req: SendEmailReq, _=Depends(mkt_auth)):
 
 def _safe_redirect(to: str) -> str:
     # Only redirect to our own site — otherwise this public link could bounce people to a phishing page.
-    return to if to and to.startswith(USER_FRONTEND_URL) else USER_FRONTEND_URL
+    ok = to and (to.startswith(USER_FRONTEND_URL + "/") or to.startswith(SITE_URL + "/") or to in (USER_FRONTEND_URL, SITE_URL))
+    return to if ok else SITE_URL
 
 
 @app.get("/api/mkt/track/click/{token}")
 def track_click(token: str, to: str = USER_FRONTEND_URL):
-    """A click proves the email was opened AND shows intent. It is recorded and the
-    lead is re-scored by the model (EmailOpenedCount is a model feature)."""
+    """Links in emails sent before v6.2 came here (new emails link to the course page itself, which
+    reports the click to the user backend). A click is recorded and the lead is re-scored by the model."""
     to = _safe_redirect(to)
     send = uq1("SELECT * FROM email_sends WHERE token=?", (token,))
     if send:
@@ -652,22 +861,27 @@ class TaskDone(BaseModel):
 
 
 @app.get("/api/mkt/actions")
-def sales_actions(status: str = "open", _=Depends(mkt_auth)):
+def sales_actions(status: str = "open", segment: str = "all", _=Depends(mkt_auth)):
     """Today's action list: who to call / message, ranked by expected extra profit."""
     rows = uq("""
         SELECT t.*, u.name, u.email, up.phone, up.whatsapp_opt_in, l.lead_score, l.recommended_action,
-               l.course_type, l.course_slug, l.tips_json
+               l.course_type, l.course_slug, l.tips_json, d.policy, d.model_best
         FROM sales_tasks t JOIN users u ON u.id=t.user_id
         LEFT JOIN user_profiles up ON up.user_id=t.user_id
         LEFT JOIN leads l ON l.id=t.lead_id
-        WHERE (?='all' OR t.status=?)
+        LEFT JOIN nba_decisions d ON d.id=t.decision_id
+        WHERE (?='all' OR t.status=?)""" + segment_sql(segment) + """
         ORDER BY CASE WHEN t.status='open' THEN 0 ELSE 1 END, t.expected_gain DESC, t.id DESC""", (status, status))
     for r in rows:
         try:
             r["tips"] = json.loads(r.pop("tips_json") or "[]")
         except ValueError:
             r["tips"] = []
-    return {"actions": rows}
+        r["simulated"] = is_simulated(r["email"])
+    hidden = 0 if segment == "all" else uq1(
+        """SELECT COUNT(*) AS c FROM sales_tasks t JOIN users u ON u.id=t.user_id WHERE (?='all' OR t.status=?)"""
+        + segment_sql("simulated" if segment != "simulated" else "real"), (status, status))["c"]
+    return {"actions": rows, "segment": segment, "other_segment_count": hidden}
 
 
 @app.post("/api/mkt/actions/{task_id}/done")
@@ -677,7 +891,7 @@ def complete_action(task_id: int, body: TaskDone, _=Depends(mkt_auth)):
         raise HTTPException(404, "Task not found")
     if body.outcome not in ("reached", "no_answer", "not_interested", "sent"):
         raise HTTPException(400, "Unknown outcome.")
-    uex("UPDATE sales_tasks SET status='done', outcome=?, done_at=datetime('now','localtime') WHERE id=?",
+    uex("UPDATE sales_tasks SET status='done', outcome=?, done_at=datetime('now','localtime'), done_by='team' WHERE id=?",
         (body.outcome, task_id))
     if task["decision_id"] and body.outcome in ("reached", "sent", "not_interested"):
         uex("UPDATE nba_decisions SET executed_at=COALESCE(executed_at, datetime('now','localtime')) WHERE id=?",
@@ -1352,22 +1566,37 @@ def learning_overview(_=Depends(mkt_auth)):
         status = internal("/api/internal/learning/status", timeout=20)
     except HTTPException:
         status = None
-    feed = uq("""SELECT * FROM (
-          SELECT 'event' AS kind, b.event_type AS what, u.name, b.created_at AS at FROM behaviour_events b
-            JOIN users u ON u.id=b.user_id WHERE b.event_type != 'page_view' ORDER BY b.id DESC LIMIT 15)
+    def feed_for(seg):
+        cond = segment_sql(seg) if seg != "all" else ""
+        return uq(f"""SELECT * FROM (
+          SELECT 'event' AS kind, b.event_type AS what, u.name, u.email, b.created_at AS at FROM behaviour_events b
+            JOIN users u ON u.id=b.user_id WHERE b.event_type != 'page_view'{cond} ORDER BY b.id DESC LIMIT 15)
         UNION ALL SELECT * FROM (
-          SELECT 'decision', d.trigger_reason || ' → ' || d.action || CASE WHEN d.policy='explore' THEN ' (random)' ELSE '' END,
-                 u.name, d.created_at FROM nba_decisions d JOIN users u ON u.id=d.user_id ORDER BY d.id DESC LIMIT 15)
+          SELECT 'decision', d.trigger_reason || ' → ' || d.action || CASE WHEN d.policy='explore' THEN ' (random)'
+                 WHEN d.policy='manual' THEN ' (by hand)' WHEN d.policy='holdout' THEN ' (control group: nothing sent)'
+                 ELSE '' END, u.name, u.email, d.created_at FROM nba_decisions d JOIN users u ON u.id=d.user_id
+          WHERE 1=1{cond} ORDER BY d.id DESC LIMIT 15)
         UNION ALL SELECT * FROM (
-          SELECT 'purchase', p.course_title, u.name, p.purchased_at FROM purchases p JOIN users u ON u.id=p.user_id
-          ORDER BY p.id DESC LIMIT 10)
+          SELECT 'purchase', p.course_title, u.name, u.email, p.purchased_at FROM purchases p JOIN users u ON u.id=p.user_id
+          WHERE 1=1{cond} ORDER BY p.id DESC LIMIT 10)
         UNION ALL SELECT * FROM (
           SELECT 'learning', 'learning run: lead model ' || COALESCE(lead_decision,'—') || ', next-best-action ' ||
-                 COALESCE(nba_decision,'—'), NULL, COALESCE(finished_at, started_at) FROM learning_runs
+                 COALESCE(nba_decision,'—') || CASE WHEN simulated=1 THEN ' (simulated history)' ELSE '' END,
+                 NULL, NULL, COALESCE(finished_at, started_at) FROM learning_runs
           WHERE status='done' ORDER BY id DESC LIMIT 5)
         ORDER BY at DESC LIMIT 30""")
+    feed = feed_for("all")                       # everyone, simulated learners tagged
+    for f in feed:
+        f["simulated"] = is_simulated(f.pop("email", None))
+    feed_all = feed
+    counts["real_people"] = uq1(f"SELECT COUNT(*) AS c FROM users WHERE is_verified=1 AND email NOT LIKE '%{DEMO_DOMAIN}'")["c"]
+    counts["simulated_people"] = uq1(f"SELECT COUNT(*) AS c FROM users WHERE email LIKE '%{DEMO_DOMAIN}'")["c"]
+    counts["real_decisions"] = uq1(f"""SELECT COUNT(*) AS c FROM nba_decisions d JOIN users u ON u.id=d.user_id
+                                      WHERE u.email NOT LIKE '%{DEMO_DOMAIN}'""")["c"]
+    counts["manual_decisions"] = uq1("SELECT COUNT(*) AS c FROM nba_decisions WHERE policy='manual'")["c"]
     return {"counts": counts, "runs": runs, "status": status, "impact": impact, "lead_model": _card(MODEL_CARD_PATH),
             "nba_model": _card(MODEL_CARD_PATH.replace("model_card.json", "nba_card.json")), "feed": feed,
+            "feed_all": feed_all,
             "settings": {"swap_confidence": settings.S["learning"]["swap_confidence"],
                          "min_new_outcomes": settings.S["learning"]["min_new_outcomes"],
                          "exploration_rate": settings.S["exploration_rate"], "window_days": CONVERSION_WINDOW_DAYS,
@@ -1406,6 +1635,32 @@ def crm_impact(days=IMPACT_DAYS):
 @app.post("/api/mkt/learning/run")
 def learning_run_now(dry_run: bool = False, _=Depends(mkt_auth)):
     return internal(f"/api/internal/learn?dry_run={'true' if dry_run else 'false'}", method="POST", timeout=600)
+
+
+# ── SIMULATED LEARNERS, LIVE (ml/live_simulation.py, run by the user-backend) ─────────────
+class SimVisitReq(BaseModel):
+    kind: str = "returning"
+
+
+class SimSwitchReq(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/mkt/simulation")
+def simulation_status(_=Depends(mkt_auth)):
+    """What the simulated learners did recently (they use the website in real time while the servers run)."""
+    return internal("/api/internal/simulation", timeout=30)
+
+
+@app.post("/api/mkt/simulation/visit")
+def simulation_visit(req: SimVisitReq, _=Depends(mkt_auth)):
+    """Send one simulated learner to the website now (or let a new one sign up) instead of waiting for the dice."""
+    return internal("/api/internal/simulation/visit", method="POST", timeout=60, body={"kind": req.kind})
+
+
+@app.post("/api/mkt/simulation/enabled")
+def simulation_switch(req: SimSwitchReq, _=Depends(mkt_auth)):
+    return internal("/api/internal/simulation/enabled", method="POST", timeout=30, body={"enabled": req.enabled})
 
 
 @app.get("/api/mkt/journeys")

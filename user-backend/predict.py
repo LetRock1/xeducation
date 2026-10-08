@@ -12,11 +12,14 @@ What changed vs the old version:
     "Hot Lead" really is more likely to buy than a "Warm Lead".
   * No hand-written floors/caps that override the model (cart = 62, enquiry
     = 42, Student cap 72 × 0.85 ...). Cart, checkout, wishlist and enquiry
-    are now model features, learned from data. The only rule left: existing
-    customers are floored to Target Immediately (the model predicts first
-    purchase, not repeat purchase).
-  * lead_score == conversion_probability × 100 (except that customer rule),
-    so the number on the dashboard and the number in PLV always agree.
+    are now model features, learned from data. v6.2 also removed the last one
+    (customers floored to 80): a customer is shown as a customer, not as a
+    number (the model predicts a first purchase, not a repeat purchase).
+  * lead_score == conversion_probability × 100, always, so the number on the
+    dashboard and the number in PLV always agree.
+  * Time since the person was last on the site (raw["away_days"]) lowers the
+    score by what the learning loop learned for it (lead_model.recency_effect)
+    — this replaced the hand-written "lead decay" rule.
   * The model file is reloaded automatically when retrained — no restart.
   * If the model file is missing, a deterministic fallback is used (the old
     mock returned a RANDOM score on every call).
@@ -32,7 +35,6 @@ import lead_model as LM
 import ml_features as F
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "ml_models", "lead_model.pkl")
-CUSTOMER_FLOOR = 80.0
 
 _lock = threading.Lock()
 _state = {"bundle": None, "mtime": None, "warned": False}
@@ -112,15 +114,38 @@ def _fallback_probs(frame: pd.DataFrame):
     return 1 / (1 + np.exp(-z))
 
 
-def _probs(rows: list) -> list:
-    frame = F.to_model_frame(rows)
+def _logits(b, rows, days):
+    z = LM.combined_logit(b, F.to_model_frame(rows))
+    if days is not None:
+        z = z + LM.recency_effects(b, days)
+    return np.asarray(z, dtype=float)
+
+
+def _probs(rows: list, away_days=None) -> list:
+    """P(buy within 14 days | lead, no action now). away_days: one value for all rows, a list (one per
+    row) or None (no time-since-last-visit adjustment).
+
+    Guard: clicking one of our emails never LOWERS the score. The base model counts clicks as interest,
+    but the learning loop can learn a negative correction for them: people who keep getting follow-ups
+    without buying stay in its data longer and pile up clicks (survivorship). That is an artefact of
+    how often the CRM writes to someone, not lower interest, so a click is worth at least nothing."""
     b = _load()
     if b is None:
-        return list(_fallback_probs(frame))
-    return list(LM.predict_proba(b, frame))
+        return list(_fallback_probs(F.to_model_frame(rows)))
+    days = None
+    if away_days is not None:
+        days = list(away_days) if isinstance(away_days, (list, tuple, np.ndarray)) else [away_days] * len(rows)
+    z = _logits(b, rows, days)
+    clicked = [i for i, r in enumerate(rows) if (r.get("EmailOpenedCount") or 0) > 0]
+    if clicked:
+        z0 = _logits(b, [dict(rows[i], EmailOpenedCount=0) for i in clicked],
+                     [days[i] for i in clicked] if days is not None else None)
+        for k, i in enumerate(clicked):
+            z[i] = max(z[i], z0[k])
+    return list(1.0 / (1.0 + np.exp(-z)))
 
 
-def _explain(clean: dict, prob: float) -> list:
+def _explain(clean: dict, prob: float, away_days=None) -> list:
     """What moved this lead's score: re-score with each present signal removed."""
     variants, meta = [], []
     for feat, label, absent in F.EXPLAIN_SIGNALS:
@@ -138,7 +163,7 @@ def _explain(clean: dict, prob: float) -> list:
         meta.append((feat, label))
     if not variants:
         return []
-    alt = _probs(variants)
+    alt = _probs(variants, away_days)
     factors = []
     for (feat, label), p_without in zip(meta, alt):
         delta = (prob - p_without) * 100
@@ -161,20 +186,26 @@ def _explain(clean: dict, prob: float) -> list:
     return factors[:6]
 
 
+def _away_text(days):
+    d = float(days)
+    if d < 2:
+        return "1 day ago"
+    return f"{d:.0f} days ago"
+
+
 def predict_lead(raw: dict, explain: bool = False) -> dict:
     """
     raw: the lead's features (see ml_features.RAW_FEATURES) plus optional
-         context: past_purchases (int). Missing/unknown values are handled.
+         context: past_purchases (int), away_days (days since the person was last
+         on the website; None = no adjustment). Missing/unknown values are handled.
     """
     r = _legacy_keys(raw)
     clean = F.normalize_raw(r)
-    prob = float(_probs([clean])[0])
+    away = r.get("away_days")
+    prob = float(_probs([clean], away)[0])
     score = round(prob * 100, 2)
 
     is_customer = (r.get("past_purchases") or 0) > 0
-    if is_customer:
-        score = max(score, CUSTOMER_FLOOR)
-
     persona = F.persona_for(score, is_customer)
     out = {
         "lead_score": score,
@@ -183,18 +214,46 @@ def predict_lead(raw: dict, explain: bool = False) -> dict:
         "customer_segment": persona,          # kept for old columns/UI
         "recommended_action": F.tier_for(score),
         "model_version": model_info().get("version", "fallback"),
+        "is_customer": is_customer,
+        "away_days": None if away is None else round(float(away), 1),
     }
     if explain:
-        factors = _explain(clean, prob)
+        factors = _explain(clean, prob, away)
+        if away is not None and LM.recency_bucket(away):
+            p_now = float(_probs([clean], 0.0)[0])
+            delta = (prob - p_now) * 100
+            if abs(delta) >= 0.5:
+                factors.append({"factor": "Time since last visit", "detail": f"Last on the site {_away_text(away)}",
+                                "impact": f"{delta:+.0f} pts", "points": round(delta, 1)})
+                factors.sort(key=lambda f: -abs(f["points"]))
+                factors = factors[:6]
         if is_customer:
-            factors.insert(0, {"factor": "Paying customer",
-                               "detail": f"{r.get('past_purchases')} past purchase(s)",
-                               "impact": f"floor {CUSTOMER_FLOOR:.0f}", "points": 0})
+            factors.insert(0, {"factor": "Already a customer",
+                               "detail": f"{r.get('past_purchases')} purchase(s); the score is the chance of buying "
+                                         "another course, which the model was not trained for",
+                               "impact": "—", "points": 0})
         if not factors:
             factors = [{"factor": "Baseline", "detail": "No strong signals yet",
                         "impact": "baseline", "points": 0}]
         out["factors"] = factors
     out["features"] = clean
+    return out
+
+
+def predict_many(raws: list) -> list:
+    """Score many people at once (the score refresh job): [(probability, score, tier, persona), ...].
+    Same numbers as predict_lead, one model call for everyone."""
+    if not raws:
+        return []
+    rows = [_legacy_keys(r) for r in raws]
+    cleans = [F.normalize_raw(r) for r in rows]
+    away = [r.get("away_days") for r in rows]
+    probs = _probs(cleans, away)
+    out = []
+    for r, p in zip(rows, probs):
+        p = float(p)
+        score = round(p * 100, 2)
+        out.append((round(p, 4), score, F.tier_for(score), F.persona_for(score, (r.get("past_purchases") or 0) > 0)))
     return out
 
 

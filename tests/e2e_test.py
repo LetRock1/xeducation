@@ -5,8 +5,10 @@ End-to-end test: drives the whole system over HTTP, the way a learner and the ma
     2. a learner signs up (the code is read from the local database: test addresses are never
        e-mailed), completes the profile and browses: every event re-scores them live
     3. they add a course to the cart and leave; the automation runs; next-best-action decides
-    4. the marketing dashboard shows them everywhere: leads, profile, "why this score",
-       what-if paths, today's actions, stats, model health, journeys, learning loop
+    4. the marketing dashboard shows them everywhere: leads (one pool with the simulated learners,
+       tagged), profile, "why this score", what-if paths, today's actions, stats, model health,
+       journeys, learning loop; the simulated learners are live and one can be sent to the website
+       now; only the team can close a real person's call task
     5. A/B test: plan, create a draft, open it, delete it; campaign: create a draft, delete it
     6. the learning loop runs (dry run: compares models, changes nothing)
     7. the learner buys; the purchase reaches the dashboard
@@ -84,8 +86,9 @@ def check(name, fn):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--user", default=os.getenv("E2E_USER_URL", "http://localhost:8000"))
-    ap.add_argument("--mkt", default=os.getenv("E2E_MKT_URL", "http://localhost:8001"))
+    # 127.0.0.1, not localhost: on Windows "localhost" is tried as IPv6 first (about 2 s per connection)
+    ap.add_argument("--user", default=os.getenv("E2E_USER_URL", "http://127.0.0.1:8000"))
+    ap.add_argument("--mkt", default=os.getenv("E2E_MKT_URL", "http://127.0.0.1:8001"))
     ap.add_argument("--db", default=os.path.join(ROOT, "user-backend", "xeducation_user.db"))
     ap.add_argument("--send-ab", action="store_true")
     a = ap.parse_args()
@@ -150,6 +153,20 @@ def main():
     check("unknown event types are refused", lambda: call(U, "POST", "/api/track", {"session_id": S["sid"],
           "event_type": "hack"}, S["tok"], expect=400) and "400")
 
+    def still_here():
+        with db() as con:
+            con.execute("UPDATE user_sessions SET last_active=datetime('now','localtime','-5 minutes') WHERE id=?",
+                        (S["sid"],))
+            con.commit()
+        call(U, "POST", "/api/session/ping", {"session_id": S["sid"]}, S["tok"])
+        with db() as con:
+            age = con.execute("SELECT (julianday('now','localtime') - julianday(last_active)) * 86400 FROM user_sessions "
+                              "WHERE id=?", (S["sid"],)).fetchone()[0]
+            events = con.execute("SELECT COUNT(*) FROM behaviour_events WHERE user_id=?", (S["uid"],)).fetchone()[0]
+        assert age < 30, f"last active {age:.0f} s ago after the ping"
+        return f"the visit stays open while the learner reads (last active {age:.0f} s ago; no event recorded, {events} events)"
+    check("'still here' ping keeps a long read from ending the visit", still_here)
+
     # 3 ─ cart, leave, automation decides
     def cart_and_leave():
         call(U, "POST", "/api/cart", {"course_slug": S["slug"]}, S["tok"])
@@ -196,6 +213,64 @@ def main():
             return f"{len(r['steps'])} first steps, best: {r['best']} ({ms:.0f} ms)"
         check("what-if paths for the lead", paths)
 
+        def agree():
+            now, _ = call(M, "GET", f"/api/mkt/leads/{S['lead']}/now", token=S["mtok"])
+            p, _ = call(M, "GET", f"/api/mkt/leads/{S['lead']}/paths", token=S["mtok"])
+            rec = now["recommendation"]["action"]
+            assert p["best"] == rec, f"what-if says {p['best']}, recommendation says {rec}"
+            first = {x["action"]: x for x in p["steps"]}
+            for o in now["options"]:
+                if o["action"] in first:
+                    assert abs(first[o["action"]]["p_buy_step"] - o["p_convert"]) < 1e-9, f"{o['action']}: numbers differ"
+            assert now["options"] and all("incremental_profit" in o for o in now["options"]), "no receipt"
+            return f"both pick '{rec}', same chance for every step ({len(now['options'])} steps on the receipt)"
+        check("recommended action and what-if paths agree (one calculation)", agree)
+
+        def do_it_now():
+            now, _ = call(M, "GET", f"/api/mkt/leads/{S['lead']}/now", token=S["mtok"])
+            if now["control_group"]:
+                call(M, "POST", f"/api/mkt/leads/{S['lead']}/act", {"action": "email_info"}, S["mtok"], expect=409)
+                return "learner is in the control group: Do it now refused, as it should be"
+            r, _ = call(M, "POST", f"/api/mkt/leads/{S['lead']}/act", {"action": "email_info"}, S["mtok"])
+            with db() as con:
+                d = con.execute("SELECT action, policy, propensity FROM nba_decisions WHERE id=?", (r["decision_id"],)).fetchone()
+                e = con.execute("SELECT token, subject FROM email_sends WHERE user_id=? ORDER BY id DESC LIMIT 1",
+                                (S["uid"],)).fetchone()
+            assert d["policy"] == "manual" and d["action"] == "email_info" and d["propensity"] == 1.0, dict(d)
+            assert e, "no email recorded"
+            S["email_token"] = e["token"]
+            call(M, "POST", f"/api/mkt/leads/{S['lead']}/act", {"action": "nonsense"}, S["mtok"], expect=400)
+            return f"{r['message']}; logged as a hand-made decision (the model's pick: {r['model_pick']})"
+        check("Do it now: sends the email and logs the decision", do_it_now)
+
+        def email_click():
+            if not S.get("email_token"):
+                return "skipped (no email was sent to this learner)"
+            r, _ = call(U, "POST", "/api/email/click", {"token": S["email_token"]})
+            assert r["ok"] and r["first_click"], r
+            call(U, "POST", "/api/email/click", {"token": "not-a-token"}, expect=400)
+            lead, _ = call(M, "GET", f"/api/mkt/leads/{S['lead']}", token=S["mtok"])
+            mine = [x for x in lead["decisions"] if x.get("email") and x["email"].get("clicked_at")]
+            assert mine, "the click is not shown with its decision"
+            return f"click recorded and shown with its decision ({mine[0]['label']})"
+        check("email button: the course page reports the click", email_click)
+
+        def real_task():
+            r, _ = call(M, "POST", f"/api/mkt/leads/{S['lead']}/act", {"action": "call"}, S["mtok"], expect=None)
+            if not isinstance(r, dict) or not r.get("ok"):
+                return f"skipped: no call possible for this learner now ({(r or {}).get('detail') if isinstance(r, dict) else r})"
+            acts, _ = call(M, "GET", "/api/mkt/actions?segment=real", token=S["mtok"])
+            mine = [t for t in acts["actions"] if t["user_id"] == S["uid"] and t["task_type"] == "call"]
+            assert mine, "the call task is not in Today's actions"
+            tid = mine[0]["id"]
+            call(U, "POST", f"/api/internal/tasks/{tid}/done", {"outcome": "reached"}, headers=internal, expect=403)
+            call(M, "POST", f"/api/mkt/actions/{tid}/done", {"outcome": "reached"}, S["mtok"])
+            done, _ = call(M, "GET", "/api/mkt/actions?status=done&segment=real", token=S["mtok"])
+            t = [x for x in done["actions"] if x["id"] == tid]
+            assert t and t[0]["done_by"] == "team" and t[0]["outcome"] == "reached", t
+            return "call task for a real person: the simulated advisor is refused (403); 'Spoke to them' records it (done by the team)"
+        check("only the team closes a real person's call task", real_task)
+
         def attribution():
             r, _ = call(M, "GET", f"/api/mkt/leads/{S['lead']}/attribution", token=S["mtok"])
             return f"{len(r['timeline'])} touchpoints"
@@ -218,6 +293,61 @@ def main():
             assert back["stage"] == "SQL" and not back["moved_by_hand"]
             return f"SQL by behaviour; moved to MQL by hand and back to auto; 'Customer' refused ({ms:.0f} ms)"
         check("pipeline board: stage from behaviour, manual move, back to auto", pipeline)
+    def segments():
+        everyone, _ = call(M, "GET", "/api/mkt/leads", token=S["mtok"])
+        c = everyone["counts"]
+        assert everyone["segment"] == "all" and c["all"] == c["real"] + c["simulated"], c
+        assert any(x["email"] == S["email"] for x in call(M, "GET", f"/api/mkt/leads?search={S['email']}",
+                                                           token=S["mtok"])[0]["leads"]), "the learner is not in the one pool"
+        real, _ = call(M, "GET", "/api/mkt/leads?segment=real", token=S["mtok"])
+        sim, _ = call(M, "GET", "/api/mkt/leads?segment=simulated&tier=Marketing%20Campaign", token=S["mtok"])
+        assert not any(x["simulated"] for x in real["leads"]), "a simulated learner under 'signed up themselves'"
+        assert all(x["simulated"] for x in sim["leads"]), "a real learner under 'simulated'"
+        scores = [round(x["lead_score"], 2) for x in sim["leads"]]
+        if len(scores) >= 10:
+            from collections import Counter
+            top = Counter(scores).most_common(1)[0][1]
+            assert top <= max(3, len(scores) // 5), f"{top} of {len(scores)} leads share one score"
+        return (f"one pool of {c['all']:,} (signed up themselves {c['real']}, simulated {c['simulated']:,}) with tags and "
+                f"filters; Campaign-tier scores all different")
+    check("leads list: one pool, tagged and filterable, no identical scores", segments)
+
+    # 4c ─ the simulated learners keep using the website (ml/live_simulation.py, run by the user-backend)
+    def simulation_live():
+        st, _ = call(M, "GET", "/api/mkt/simulation", token=S["mtok"])
+        if not st["learners"]["total"]:
+            return "no simulated learners in this database (starting history removed)"
+        if not st["enabled"]:
+            return "paused on the Dashboard (nothing to check)"
+        last = st.get("last_tick")
+        assert last, "the simulation never ran"
+        age = time.time() - time.mktime(time.strptime(last[:19], "%Y-%m-%d %H:%M:%S"))
+        assert age < 120, f"the simulation last ran {age:.0f} s ago"
+        d = st["last_24h"]
+        return (f"{st['learners']['total']:,} simulated learners, {st['learners']['still_deciding']} still deciding; last 24 h: "
+                f"{d['visits']} visits, {d['email_clicks']} e-mail clicks, {d['purchases']} purchases, {d['signups']} sign-ups")
+    check("simulated learners are using the website live", simulation_live)
+
+    def simulation_visit():
+        st, _ = call(M, "GET", "/api/mkt/simulation", token=S["mtok"])
+        if not st["enabled"] or not st["learners"]["total"]:
+            return "skipped (paused, or no simulated learners)"
+        t0 = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 2))
+        r, _ = call(M, "POST", "/api/mkt/simulation/visit", {"kind": "returning"}, S["mtok"])
+        uid = r["user_id"]
+        for _ in range(40):
+            with db() as con:
+                s = con.execute("SELECT id, lead_source, device_type FROM user_sessions WHERE user_id=? AND login_at >= ? "
+                                "ORDER BY id DESC LIMIT 1", (uid, t0)).fetchone()
+            if s:
+                break
+            time.sleep(1)
+        assert s, f"{r['name']} did not start a visit within 40 s"
+        lead, _ = call(M, "GET", f"/api/mkt/leads/{r['lead_id']}", token=S["mtok"])
+        assert lead["simulated"], "not tagged simulated"
+        return f"{r['name']} opened the website (session {s['id']}, {s['device_type']}, {s['lead_source']}) through the public API"
+    check("Dashboard: send a simulated learner to the website now", simulation_visit)
+
     for name, path in [("dashboard stats", "/api/mkt/stats"), ("model health", "/api/mkt/model/health"),
                        ("priority queue", "/api/mkt/priority-queue"), ("today's actions", "/api/mkt/actions"),
                        ("next-best-action report", "/api/mkt/nba/performance"), ("forecast", "/api/mkt/forecast"),
@@ -314,6 +444,23 @@ def main():
         assert lead.get("purchases"), "purchase not visible to marketing"
         return f"{len(p)} purchase(s), visible in the dashboard"
     check("learner buys; the dashboard sees it", buy)
+
+    def customer_view():
+        lead, _ = call(M, "GET", f"/api/mkt/leads/{S['lead']}", token=S["mtok"])
+        assert lead["customer"], "not marked as a customer"
+        now, _ = call(M, "GET", f"/api/mkt/leads/{S['lead']}/now", token=S["mtok"])
+        assert now["recommendation"] is None and now["purchases"], "a customer still gets a recommendation"
+        p, _ = call(M, "GET", f"/api/mkt/leads/{S['lead']}/paths", token=S["mtok"])
+        assert p.get("customer") and not p["steps"], "a customer still gets what-if paths"
+        call(M, "POST", f"/api/mkt/leads/{S['lead']}/act", {"action": "email_coupon_10"}, S["mtok"], expect=409)
+        rows, _ = call(M, "GET", f"/api/mkt/leads?tier=Customers&search={S['email']}", token=S["mtok"])
+        assert any(x["email"] == S["email"] for x in rows["leads"]), "not in the Customers tab"
+        rows, _ = call(M, "GET", f"/api/mkt/leads?tier=Low%20Priority&search={S['email']}", token=S["mtok"])
+        assert not any(x["email"] == S["email"] for x in rows["leads"]), "a customer is still listed in a tier"
+        bought = [x for x in lead["decisions"] if x.get("outcome") == "bought"]
+        assert bought, "the purchase is not credited to the decisions before it"
+        return f"shown as a customer: no recommendation, no paths, no Do it now; {len(bought)} decision(s) now say 'bought'"
+    check("a customer is shown as a customer", customer_view)
 
     # 8 ─ delete the account
     def delete():

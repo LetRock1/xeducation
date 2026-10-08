@@ -412,9 +412,11 @@ def _prior():
 
 def _decision_log(con, as_of):
     purchases = _read(con, "SELECT user_id, purchased_at FROM purchases WHERE purchased_at <= ?", (as_of,))
+    # only the logging policy's own decisions (model or random): hand-made steps ("Do it now" on the lead
+    # page, policy='manual') were not drawn from it, so they would bias the inverse-propensity weights
     d = _read(con, """SELECT id, user_id, action, propensity, base_probability, price, features_json,
-                             created_at AS t FROM nba_decisions WHERE propensity > 0 AND COALESCE(policy,'') != 'holdout'
-                         AND created_at <= ?""", (as_of,))
+                             created_at AS t FROM nba_decisions WHERE propensity > 0
+                         AND COALESCE(policy,'') NOT IN ('holdout', 'manual') AND created_at <= ?""", (as_of,))
     if d.empty:
         return d
     d["y"], d["matured"], d["customer"] = _outcomes(d, "t", purchases, as_of)
@@ -589,6 +591,13 @@ def run(as_of=None, reason="manual", force=True, dry_run=False, simulated=False,
                 return {"status": "skipped", "outcomes_known": n_known, "new_outcomes": new,
                         "message": f"{new} new outcome(s) since the last run; waiting for "
                                    f"{CONF.get('min_new_outcomes', 30)}."}
+            if last and new <= 0 and not dry_run and not simulated:
+                # pressing "Retrain now" again with nothing new would only repeat the last run
+                return {"status": "nothing_new", "outcomes_known": n_known, "new_outcomes": 0,
+                        "last_run_id": last["id"], "last_run_at": last.get("finished_at"),
+                        "message": f"Nothing new since run {last['id']}: no new outcomes are known yet, so the result "
+                                   f"would be the same. The loop runs by itself when "
+                                   f"{CONF.get('min_new_outcomes', 30)} new outcomes are known."}
             bundle = _load_lead_bundle()
             try:
                 nba_before = joblib.load(NBA_PATH).get("version") if os.path.exists(NBA_PATH) else None
@@ -671,6 +680,12 @@ def run(as_of=None, reason="manual", force=True, dry_run=False, simulated=False,
                     nba.get("decision"), json.dumps(nba, default=str), res.get("lead_version_before"), lead_after,
                     nba_before, nba.get("version_after") or nba_before, res.get("note"), run_id))
         res.update(status="done", run_id=run_id, lead_version_after=lead_after, learned=learned)
+        if res.get("lead_decision") == "swapped" and not simulated:
+            try:                       # every lead's stored score now comes from the new model
+                import scoring
+                res["rescored"] = scoring.refresh_scores("model_update")
+            except Exception as e:
+                print("[LEARN] score refresh after the swap failed:", e)
         say(f"[LEARN] run {run_id} as of {as_of}: {n_known} decisions with an outcome ({res['new_outcomes']} new), "
             f"{res.get('control_people', 0)} untouched control people · lead model {res.get('lead_decision')} · "
             f"next-best-action {nba.get('decision')}")

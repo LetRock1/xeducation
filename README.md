@@ -21,12 +21,15 @@ the new model is better. Demo client: X Education.
    `MARKETING_EMAIL` / `MARKETING_PASSWORD` from `marketing-backend/.env`).
 5. **`stop-all.bat`** stops everything.
 
-Everything else runs by itself while the servers are up. By hand, if you want:
+Everything else runs by itself while the servers are up — including the simulated learners, who
+keep using the website in real time (see below). By hand, if you want:
 
 | To | Do |
 |---|---|
 | Retrain now | Learning loop page → **Retrain now** (or **Dry run**) |
+| Watch a simulated learner now, or pause them | Dashboard → Simulated learners → **Send a learner to the website now** / **Pause** |
 | Check that everything works (servers running) | `user-backend\venv\Scripts\python.exe tests\e2e_test.py` |
+| Check the live simulation (no servers needed; uses a private copy) | `user-backend\venv\Scripts\python.exe tests\test_live_simulation.py` |
 | Re-run the experiments behind the numbers below | `user-backend\venv\Scripts\python.exe ml\run_experiments.py` |
 | Delete the simulated history | `user-backend\venv\Scripts\python.exe ml\generate_history.py --remove` |
 | Change business rules (tiers, costs, timings, control group) | edit `crm_settings.json`, restart |
@@ -40,6 +43,8 @@ If something goes wrong:
 | No e-mails arrive | Gmail is not set: codes and e-mails are printed as `[EMAIL MOCK]` in the user-backend window |
 | A lead never gets an automatic step | it is in the 5% control group (the lead page says so) |
 | `[GEMINI] network problem` | no internet: templates are used for 5 minutes, then Gemini is tried again |
+| Dashboard: simulated learners "paused" | someone pressed **Pause**, or `live_simulation.enabled` is `false` in `crm_settings.json`: press **Resume** |
+| `[EMAIL DEMO] To: …@demo.xeducation.test` lines in the user-backend window | normal: an e-mail the CRM sent to a simulated learner, recorded and never delivered |
 
 ## One loop
 
@@ -93,13 +98,18 @@ questions: [DEMO.md](DEMO.md) · what changed: [CHANGES.md](CHANGES.md).
   running CRM the learning loop corrects the base model from the CRM's own outcomes.
 * **The main evidence for the learning loop** comes from a **real** randomized e-mail experiment
   (Hillstrom, 64,000 customers).
-* **The six-month starting history** (2,000 learners, e-mails ending in `@demo.xeducation.test`,
-  never sent) is **simulated** and marked "simulated" everywhere, because X Education's own CRM
-  history is not public. Real activity is added on top.
+* **The learners are one pool.** People who sign up on the website themselves, and **simulated
+  learners**: the 2,000 people of a six-month starting history plus about 13 new ones a day
+  (addresses `@demo.xeducation.test`, never e-mailed; tagged "simulated" in the dashboard). A CRM is
+  normally switched on inside a business that already has leads; this project has none, so the
+  simulated learners are that business. While the servers run they **keep using the website in
+  real time** through its own API, exactly like a browser, react to the CRM's real e-mails, coupons
+  and calls, and buy (`ml/live_simulation.py`; their behaviour is a documented simulator, and their
+  hidden traits are never shown to the CRM). The CRM treats everyone the same way.
 
 ## Folders
 
 `user-backend/` learner API, scoring, decisions, learning loop · `marketing-backend/` dashboard
 API, campaigns, A/B engine, adopted winners, Ask the CRM · `user-frontend/` the course website ·
-`marketing-frontend/` the dashboard · `ml/` training, history generator, experiments
-(`ml/results/`) · `tests/` automated tests · `crm_settings.json` business rules.
+`marketing-frontend/` the dashboard · `ml/` training, history generator, live simulation of the
+learners, experiments (`ml/results/`) · `tests/` automated tests · `crm_settings.json` business rules.

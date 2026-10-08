@@ -31,3 +31,7 @@ Thumbs.db
 
 # Snapshot made by scraping.py (for sharing the code), not part of the project
 new.txt
+
+# added by the v6.3 update
+*.db-journal
+*.update-new

@@ -97,6 +97,41 @@ def predict_proba(bundle, frame: pd.DataFrame) -> np.ndarray:
     return _sigmoid(combined_logit(bundle, frame))
 
 
+# ── How long since the person was last on the website (learned by the loop) ────────────────
+# The learning loop fits "last seen 1-7 / 7-14 / 14-30 / 30+ days ago" next to the CRM's own actions
+# (learning.py: RECENCY_COLS) and stores the effects in live["own_effects"]. Applying them when scoring
+# makes the score fall by itself when someone goes quiet: the old "lead decay" rule (cap the score at
+# the top of the next tier) is not needed any more, and the drop is learned from outcomes, not set by hand.
+RECENCY_BUCKETS = [("away_1_7_days", 1, 7), ("away_7_14_days", 7, 14),
+                   ("away_14_30_days", 14, 30), ("away_30_days_plus", 30, None)]
+RECENCY_LABELS = {"away_1_7_days": "1-7 days", "away_7_14_days": "7-14 days",
+                  "away_14_30_days": "14-30 days", "away_30_days_plus": "30+ days"}
+
+
+def recency_bucket(days):
+    """The learning loop's bucket for 'days since last seen' (same edges as learning.assemble)."""
+    if days is None:
+        return None
+    d = float(days)
+    for name, lo, hi in RECENCY_BUCKETS:
+        if d > lo and (hi is None or d <= hi):
+            return name
+    return None                                    # seen within the last day: no adjustment
+
+
+def recency_effect(bundle, days) -> float:
+    """Log-odds the loop learned for this many days away (0 if nothing learned yet)."""
+    name = recency_bucket(days)
+    if not name:
+        return 0.0
+    effects = ((bundle or {}).get("live") or {}).get("own_effects") or {}
+    return float(effects.get(name, 0.0) or 0.0)
+
+
+def recency_effects(bundle, days_list) -> np.ndarray:
+    return np.array([recency_effect(bundle, d) for d in days_list], dtype=float)
+
+
 def learned_points(bundle, base_prob=0.30):
     """How many score points each live signal adds for a typical lead (base_prob), for display."""
     live = bundle.get("live") or empty_live()

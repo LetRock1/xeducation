@@ -10,14 +10,18 @@
  *   source       utm_source / referrer of the landing page -> LeadSource
  *   intent       video, brochure, chat, pricing / testimonial *dwell* (4 s in view),
  *                webinar seat, cart, wishlist, checkout
+ *   presence     a "still here" ping every 30 s while the page is really in use, so
+ *                the CRM's "visit ended" follow-up waits until the learner has left
  *
  * Before: the session id from login was reused forever (TotalVisits stuck at 1),
  * device was always "Desktop", source always "Direct Traffic", and pricing /
  * testimonial / webinar fired as soon as the section scrolled past.
  */
-import { startSession, trackEvent } from './api'
+import { startSession, trackEvent, pingSession } from './api'
 
 const IDLE_MS = 30 * 60 * 1000
+const PING_MS = 30 * 1000          // "still here" while the learner is using the page
+const PRESENT_MS = 60 * 1000       // ... i.e. clicked, typed, scrolled or moved the mouse in the last minute
 const LS_SID = 'xe_sid'
 const LS_LAST = 'xe_last_active'
 const SS_SOURCE = 'xe_source'
@@ -47,7 +51,8 @@ export function captureSource() {
     const params = new URLSearchParams(window.location.search)
     const utm = (params.get('utm_source') || '').toLowerCase()
     let source = 'Direct Traffic'
-    if (utm) source = (UTM_MAP.find(([re]) => re.test(utm)) || [null, 'Reference'])[1]
+    if (params.get('ref')) source = 'Email Campaign'            // arrived from the button in one of our emails
+    else if (utm) source = (UTM_MAP.find(([re]) => re.test(utm)) || [null, 'Reference'])[1]
     else if (document.referrer && !document.referrer.startsWith(window.location.origin)) {
       const hit = REFERRER_MAP.find(([re]) => re.test(document.referrer))
       if (hit) source = hit[1]
@@ -114,6 +119,25 @@ function flushPage(useBeacon = false) {
     return
   }
   fire('page_view', slug, sec)
+}
+
+// "Still here": while the learner is really using the page (tab visible, some input in the last minute),
+// tell the server every 30 s. Nothing is recorded as an event; only the visit's last-active time moves,
+// so the CRM does not take a long read for a visit that has ended (it follows up after the learner leaves).
+let _lastInput = Date.now()
+async function stillHere() {
+  if (!loggedIn() || document.visibilityState !== 'visible') return
+  if (Date.now() - _lastInput > PRESENT_MS) return
+  const sid = _sessionId || await ensureSession()      // after a page reload the visit is picked up again
+  if (!sid) return
+  localStorage.setItem(LS_LAST, String(Date.now()))
+  pingSession({ session_id: sid }).catch(() => { /* never breaks the page */ })
+}
+if (typeof window !== 'undefined') {
+  ['mousemove', 'keydown', 'scroll', 'click', 'touchstart'].forEach(ev =>
+    window.addEventListener(ev, () => { _lastInput = Date.now() }, { passive: true }))
+  setTimeout(stillHere, 5000)
+  setInterval(stillHere, PING_MS)
 }
 
 if (typeof document !== 'undefined') {

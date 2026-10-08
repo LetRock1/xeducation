@@ -9,6 +9,7 @@ import html as _html
 import os
 import re
 import smtplib
+import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -18,6 +19,9 @@ load_dotenv()
 GMAIL_USER = os.getenv("GMAIL_USER", "")
 GMAIL_PASS = os.getenv("GMAIL_APP_PASSWORD", "")
 BRAND_FOOTER = "X Education · Mumbai, India"
+SMTP_TIMEOUT_SECONDS = 10          # a dead network used to hang a request for minutes
+PAUSE_AFTER_NETWORK_ERROR = 300    # then don't try again for 5 minutes (no 10-second wait per email)
+_paused_until = {"t": 0.0}
 
 
 def _send(to: str, subject: str, body: str, html: str = None, headers: dict = None) -> tuple[bool, str]:
@@ -28,6 +32,9 @@ def _send(to: str, subject: str, body: str, html: str = None, headers: dict = No
     if not GMAIL_USER or not GMAIL_PASS:
         print(f"[EMAIL MOCK] To: {to} | Subject: {subject}")
         return True, "Mock sent (configure Gmail in .env for real sending)"
+    if time.time() < _paused_until["t"]:
+        print(f"[EMAIL PAUSED] To: {to} | Subject: {subject} (Gmail was unreachable a moment ago; not sent)")
+        return False, "Email is paused for a few minutes after a network error"
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
@@ -38,12 +45,28 @@ def _send(to: str, subject: str, body: str, html: str = None, headers: dict = No
         msg.attach(MIMEText(body, "plain", "utf-8"))
         if html:
             msg.attach(MIMEText(html, "html", "utf-8"))
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=SMTP_TIMEOUT_SECONDS) as s:
             s.login(GMAIL_USER, GMAIL_PASS)
             s.sendmail(GMAIL_USER, to, msg.as_string())
         return True, f"Sent to {to}"
+    except smtplib.SMTPAuthenticationError:
+        print("[EMAIL ERROR] Gmail refused the login: check GMAIL_USER and GMAIL_APP_PASSWORD in .env")
+        return False, "Gmail refused the login (check the app password in .env)"
+    except (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError) as e:
+        return _network_error(e)
+    except smtplib.SMTPException as e:            # e.g. one address refused: no reason to pause the others
+        print(f"[EMAIL ERROR] {type(e).__name__}: {e}")
+        return False, str(e)
+    except OSError as e:                           # no internet, DNS failure, timeout
+        return _network_error(e)
     except Exception as e:
         return False, str(e)
+
+
+def _network_error(e):
+    _paused_until["t"] = time.time() + PAUSE_AFTER_NETWORK_ERROR
+    print(f"[EMAIL ERROR] {type(e).__name__}: {e} - emails paused for {PAUSE_AFTER_NETWORK_ERROR // 60} minutes")
+    return False, f"Could not reach Gmail ({type(e).__name__})"
 
 
 def _shell(title: str, inner_html: str, footer_extra: str = "") -> str:
@@ -96,6 +119,7 @@ ATTRIBUTION_LABELS = {
     "manual_send":        "an email from our admissions team",
     "next_best_action":   "a personalised follow-up from our team",
     "chat_callback":      "your callback request",
+    "manual":             "a personal follow-up from our admissions team",
     "email_click":        "an email you clicked",
     "decay":              "your ongoing interest on our site",
     None:                 "your visit to X Education",

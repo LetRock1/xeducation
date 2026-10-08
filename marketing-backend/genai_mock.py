@@ -38,6 +38,7 @@ TRIGGER_CONTEXT = {
     "manual_edit":      "a marketing team member is drafting this email manually",
     "next_best_action": "the system chose this follow-up as the most helpful next step",
     "chat_callback":    "they asked for a callback in the website chat",
+    "manual":           "someone in the admissions team chose to follow up with them personally",
 }
 
 # Default offer per tier, used only when no next-best-action decision is passed in.
@@ -103,6 +104,7 @@ def _trigger_line(trigger, title):
         "session_end": f"Thanks for exploring {title} on our site.",
         "decay": f"It's been a while since you looked at {title} — here's what's new to help you decide.",
         "chat_callback": f"Thanks for asking for a callback about {title}. An advisor will call you shortly.",
+        "manual": f"I'm following up personally about {title}, which you looked at on our site.",
     }.get(trigger, f"Here's a quick overview of {title}.")
 
 

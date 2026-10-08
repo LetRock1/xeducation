@@ -1,7 +1,9 @@
 import sqlite3
 import os
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "xeducation_user.db")
+# USER_DB_PATH_OVERRIDE (environment only) points a server at a copy of the database: tests/test_live_simulation.py
+# starts a private website on a copy, so the real data is never touched by a test.
+DB_PATH = os.getenv("USER_DB_PATH_OVERRIDE") or os.path.join(os.path.dirname(__file__), "xeducation_user.db")
 
 
 def get_conn():
@@ -421,6 +423,7 @@ def init_db():
         "ALTER TABLE user_sessions ADD COLUMN followed_up INTEGER DEFAULT 0",
         "ALTER TABLE email_sends ADD COLUMN adoption_id INTEGER",
         "ALTER TABLE email_sends ADD COLUMN adoption_arm TEXT",
+        "ALTER TABLE sales_tasks ADD COLUMN done_by TEXT",
     ):
         try:
             c.execute(col_sql)
@@ -557,9 +560,10 @@ def get_behaviour_summary(user_id):
         checkouts = q("SELECT COUNT(*) AS c FROM checkout_sessions WHERE user_id=?")["c"]
         enquiries = q("SELECT COUNT(*) AS c FROM leads WHERE user_id=? AND trigger_reason='enquiry'")["c"]
 
+        # most-viewed course; ties go to the one seen most recently (the score refresh uses the same rule)
         row = q("""SELECT course_slug, COUNT(*) AS cnt FROM behaviour_events
                    WHERE user_id=? AND course_slug IS NOT NULL
-                   GROUP BY course_slug ORDER BY cnt DESC LIMIT 1""")
+                   GROUP BY course_slug ORDER BY cnt DESC, MAX(id) DESC LIMIT 1""")
         last_session = q("SELECT device_type FROM user_sessions WHERE user_id=? "
                          "AND device_type IS NOT NULL ORDER BY id DESC LIMIT 1")
         # acquisition source = first visit that came from somewhere specific

@@ -43,6 +43,7 @@ export const getMe         = () => api.get('/auth/me');
 export const completeProfile = (d) => api.post('/profile/complete', d);
 export const updatePrefs   = (d) => api.put('/profile/preferences', d);
 export const startSession  = (d) => api.post('/session/start', d);
+export const pingSession   = (d) => api.post('/session/ping', d);
 export const trackEvent    = (d) => api.post('/track', d);
 export const getRecommendations = () => api.get('/recommendations');
 export const getCart       = () => api.get('/cart');
@@ -71,5 +72,8 @@ export const checkCoupon    = (code) => api.post('/coupons/check', { code });
 export const sendChat       = (d) => api.post('/chat', d);
 export const requestCallback= (d) => api.post('/callback', d);
 export const getInsights    = () => api.get('/me/insights');
+// the "View Course" button in our emails lands on the course page with ?ref=<token>: report the click
+export const emailClick     = (token) => api.post('/email/click', { token });
+export const emailUnsubscribe = (token) => api.post('/email/unsubscribe', { token });
 
 export default api;

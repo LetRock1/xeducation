@@ -79,8 +79,10 @@ def steps(since=None, until=None):
     """One row per decision: stage, action, reaction within 3 days, bought within the window, weight."""
     until = until or time.strftime("%Y-%m-%d %H:%M:%S")
     since = since or "0000"
+    # the logging policy's own decisions only (hand-made "Do it now" steps were not drawn from it)
     d = _read("""SELECT id, user_id, action, propensity, base_probability, features_json, created_at AS t, policy
-                 FROM nba_decisions WHERE created_at >= ? AND created_at <= ? AND propensity > 0""", (since, until))
+                 FROM nba_decisions WHERE created_at >= ? AND created_at <= ? AND propensity > 0
+                 AND COALESCE(policy, '') != 'manual'""", (since, until))
     if d.empty:
         return d
     d["t"] = pd.to_datetime(d["t"])

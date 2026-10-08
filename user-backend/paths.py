@@ -1,34 +1,30 @@
 """
-paths.py — WHAT-IF PATHS for one lead: "if the team does this, the learner will probably do
-that, and then the best next step is ...", two (optionally three) team steps ahead.
+paths.py — WHAT-IF PATHS for one lead: "if the team does this now, the learner will probably do
+that in the next 3 days, and then the best next step is ...".
 
-    step 1   every action the team may take now (consent, phone, call capacity respected)
-    react    how learners in the same lifecycle stage reacted to that action in the next
-             3 days, from the CRM's history (journeys.py, inverse-propensity weighted):
-             bought / cart-checkout-enquiry / came back and engaged / clicked / nothing
-    step 2   for each likely reaction, the best follow-up for the learner as they would
-             then be (their features updated by the reaction, re-scored by the lead model)
+    step 1   every step the team may take now, with the SAME numbers and the SAME pick as the
+             lead page's recommendation (nba.recommend_now -> nba.evaluate, the calculation behind
+             every automatic decision). So the what-if paths and "Recommended action" always agree.
+    react    how learners in the same lifecycle stage reacted to that step in the next 3 days, from
+             the CRM's own history (journeys.py, inverse-propensity weighted): bought / cart-
+             checkout-enquiry / came back and engaged / clicked / nothing. When there is too little
+             history for the stage and step, the page says so instead of showing a guess.
+    step 2   for each likely reaction, the best follow-up for the learner as they would then be
+             (their features updated by the reaction, re-scored by the same models and rules).
 
-Chances of buying come from the same models the decision engine uses: the lead model
-(P(buy | no action)) and the next-best-action uplift model (P(buy | action)), so the tree
-is personal to this lead; the reaction mix is what history shows for similar leads.
-The best path maximises expected profit = P(buy) x price x (1 - discount) - costs,
-looking at the best follow-up after each likely reaction (a two-step look-ahead).
-
-Honesty: reactions are averages for leads in the same stage, and a path's chance of
-buying is an estimate from the models — the paths show where the evidence points, not a
-guarantee. Every node says how many past decisions it is based on.
+Customers get no paths: the CRM does not try to sell a course someone already owns.
 """
 import catalog
 import database as db
 import journeys as J
-import ml_features as F
 import nba
 import nba_core as N
 from predict import predict_lead
-from scoring import build_raw, interest_slug
 
 STEP_REACTIONS = ["advanced", "engaged", "clicked", "none"]
+MIN_HISTORY = 30            # decisions needed before a reaction mix is shown
+STAGE_LABELS = {"Lead": "New lead", "Engaged": "Engaged", "MQL": "Interested (MQL)",
+                "SQL": "Ready to buy (SQL)", "Customer": "Customer"}
 
 
 def _apply(features: dict, reaction: str) -> dict:
@@ -53,131 +49,124 @@ def _apply(features: dict, reaction: str) -> dict:
     return f
 
 
-def _score(features):
-    p = predict_lead(dict(features))
-    return p["conversion_probability"], p["lead_score"], p["recommended_action"]
-
-
-def _blocked(features, has_phone):
-    b = N.eligible(features, has_phone)
-    if nba._calls_today() >= nba.DAILY_CALL_CAPACITY and not b["call"]:
-        b["call"] = "today's call capacity is used up"
-    return b
-
-
-def _value(p, price, discount, cost):
-    return p * price * (1 - discount) - cost
+def _reaction_mix(jm, stage, action):
+    """(reaction probabilities, evidence) from history, or (None, evidence) when there is too little."""
+    st = (jm.get("stages") or {}).get(stage) or {}
+    cell = (st.get("actions") or {}).get(action) or {}
+    if (cell.get("n") or 0) >= MIN_HISTORY:
+        return cell["reactions"], {"decisions": cell["n"], "basis": f"{STAGE_LABELS.get(stage, stage)} leads after this step"}
+    if (st.get("n") or 0) >= MIN_HISTORY:
+        # this step was rarely taken for this stage: the stage's own mix (all steps), said plainly
+        mix = {}
+        acts = st.get("actions") or {}
+        tot = sum((c.get("n") or 0) for c in acts.values())
+        if tot:
+            for r in J.REACTIONS:
+                mix[r] = sum((c.get("n") or 0) * c["reactions"].get(r, 0) for c in acts.values()) / tot
+            return mix, {"decisions": int(tot), "basis": f"{STAGE_LABELS.get(stage, stage)} leads after any step "
+                                                         f"(only {cell.get('n') or 0} after this one)"}
+    return None, {"decisions": int(cell.get("n") or 0), "basis": "not enough history yet"}
 
 
 def plan(user_id, depth=2, course_slug=None):
-    user = db.get_user_by_id(user_id)
-    if not user:
+    now = nba.recommend_now(user_id)
+    if now is None:
         return None
-    slug = course_slug or interest_slug(user_id)
-    price = float(catalog.price_of(slug) or catalog.average_price())
-    raw = build_raw(user_id, course=slug)
-    pred = predict_lead(raw)
-    x0 = pred["features"]
+    lead_info = {"user_id": user_id, "name": now["name"], "customer": now["customer"],
+                 "control_group": now["control_group"]}
+    if now.get("recommendation") is None:
+        return {"lead": lead_info, "customer": True, "steps": [], "best": None, "purchases": now["purchases"],
+                "summary": now.get("message"), "note": "What-if paths are for people who have not bought yet."}
+
+    x0 = now["features"]
+    price = float(now["course"]["price"])
+    stage = J.stage_of(x0)
+    jm = J.model()
     profile = db.get_profile(user_id) or {}
     has_phone = bool((profile.get("phone") or "").strip())
-    bought = (raw.get("past_purchases") or 0) > 0
-    stage = J.stage_of(x0, bought=bought)
-    jm = J.model()
-    cells = (jm["stages"].get(stage) or {}).get("actions", {}) if stage != "Customer" else {}
-    blocked = _blocked(x0, has_phone)
-    allowed = [a for a in N.ACTION_LIST if not blocked[a]] or ["none"]
-    p0 = nba.action_probabilities(x0, pred["conversion_probability"])     # P(buy within 14 days | x0, a)
+    best = now["recommendation"]["action"]
+    by_action = {o["action"]: o for o in now["options"]}
+    allowed = [o["action"] for o in now["options"] if not o["blocked"]] or ["none"]
 
-    # the learner after each possible reaction (independent of which action caused it)
+    # the learner after each possible reaction, and the best follow-up then (same rules and models)
     after = {}
     for r in STEP_REACTIONS:
         x1 = _apply(x0, r)
-        prob1, score1, tier1 = _score(x1)
-        after[r] = {"x": x1, "base": prob1, "score": score1, "tier": tier1, "stage": J.stage_of(x1),
-                    "p": nba.action_probabilities(x1, prob1)}
+        p1 = predict_lead(dict(x1, away_days=0))
+        p1["raw"] = {"past_purchases": len(now["purchases"])}
+        ev1 = nba.evaluate(user_id, p1, now["course"]["slug"])
+        after[r] = {"score": p1["lead_score"], "tier": p1["recommended_action"], "stage": J.stage_of(x1),
+                    "ev": ev1, "p_none": ev1["values"]["none"]["p_convert"]}
 
-    def best_next(r, first_discount):
-        a = after[r]
-        allowed2 = [k for k in N.ACTION_LIST if not _blocked(a["x"], has_phone)[k]] or ["none"]
+    def follow_up(r, first_discount):
+        """Best next step after reaction r (a second discount is not stacked on the first)."""
+        ev1 = after[r]["ev"]
         opts = []
-        for k in allowed2:
-            spec = N.ACTIONS[k]
-            opts.append({"action": k, "label": spec["label"], "p_buy": a["p"][k],
-                         "value": _value(a["p"][k], price, max(first_discount, spec["discount"]), spec["cost_inr"])})
-        opts.sort(key=lambda o: -o["value"])
-        return opts
+        for o in ev1["options"]:
+            if o["blocked"]:
+                continue
+            disc = max(first_discount, o["discount"])
+            value = o["p_convert"] * price * (1 - disc) - o["cost"]
+            opts.append({"action": o["action"], "label": o["label"], "p_buy": o["p_convert"],
+                         "gain": value - ev1["values"]["none"]["p_convert"] * price * (1 - first_discount)})
+        opts.sort(key=lambda x: (-x["gain"], x["action"] != "none"))
+        top = opts[0] if opts else {"action": "none", "label": N.ACTIONS["none"]["label"],
+                                    "p_buy": after[r]["p_none"], "gain": 0.0}
+        if top["gain"] <= 0:
+            top = next((o for o in opts if o["action"] == "none"), top)
+        return top
 
     steps = []
     for a1 in allowed:
-        spec = N.ACTIONS[a1]
-        cell = cells.get(a1) or {"n": 0, "reactions": {"bought": 0.0, "advanced": 0.1, "engaged": 0.2,
-                                                       "clicked": 0.0, "none": 0.7}, "buy14": p0[a1]}
-        react = cell["reactions"]
-        share3 = react.get("bought", 0.0) / max(cell["buy14"], 0.01)    # share of purchases in the first 3 days
-        q1 = min(p0[a1], p0[a1] * min(share3, 1.0))
-        rest = sum(react[r] for r in STEP_REACTIONS) or 1.0
-        reactions, exp_profit, p_path = [], q1 * price * (1 - spec["discount"]), q1
-        for r in STEP_REACTIONS:
-            pr = (1 - q1) * react[r] / rest
-            if r == "clicked" and spec["channel"] not in ("email", "whatsapp"):
-                pr = 0.0
-            opts = best_next(r, spec["discount"])
-            nxt = opts[0]
-            exp_profit += pr * nxt["value"]
-            p_path += pr * nxt["p_buy"]
-            reactions.append({"reaction": r, "label": J.REACTION_LABELS[r], "prob": pr,
-                              "next": {"score": after[r]["score"], "tier": after[r]["tier"], "stage": after[r]["stage"]},
-                              "best_next": nxt, "options": opts[:3]})
-        exp_profit -= spec["cost_inr"]
-        reactions = [r for r in reactions if r["prob"] > 0.004]
-        reactions.sort(key=lambda r: -r["prob"])
-        steps.append({"action": a1, "label": spec["label"], "cost": spec["cost_inr"], "discount": spec["discount"],
-                      "p_buy_step": p0[a1], "early_buy": q1, "reactions": reactions, "p_buy_path": p_path,
-                      "expected_profit": exp_profit,
-                      "evidence": {"stage": stage, "decisions": cell["n"], "buy_rate": cell["buy14"]}})
-    steps.sort(key=lambda s: -s["expected_profit"])
-    base = next((s for s in steps if s["action"] == "none"), None)
-    for s in steps:
-        s["gain_vs_nothing"] = s["expected_profit"] - base["expected_profit"] if base else None
-    best = steps[0] if steps else None
-    if best and depth >= 3 and best["reactions"]:
-        r = next((x for x in best["reactions"] if x["reaction"] != "none"), best["reactions"][0])
-        a2 = r["best_next"]["action"]
-        cell2 = ((jm["stages"].get(after[r["reaction"]]["stage"]) or {}).get("actions") or {}).get(a2)
-        if cell2:
-            r2 = max(STEP_REACTIONS, key=lambda k: cell2["reactions"][k] if k != "none" else -1)
-            x2 = _apply(after[r["reaction"]]["x"], r2)
-            prob2, score2, tier2 = _score(x2)
-            p2 = nba.action_probabilities(x2, prob2)
-            allowed3 = [k for k in N.ACTION_LIST if not _blocked(x2, has_phone)[k]] or ["none"]
-            a3 = max(allowed3, key=lambda k: _value(p2[k], price, N.ACTIONS[k]["discount"], N.ACTIONS[k]["cost_inr"]))
-            best["then"] = {"after": r["reaction"], "step2": a2, "reaction2": r2,
-                            "reaction2_label": J.REACTION_LABELS[r2], "step3": a3, "step3_label": N.ACTIONS[a3]["label"],
-                            "p_buy": p2[a3], "score": score2, "tier": tier2}
-    summary = None
-    if best:
-        def _reaction_text(r):
-            return {"none": "there's no response", "engaged": "they come back", "advanced": "they add to cart or enquire",
-                    "clicked": "they click"}.get(r["reaction"], r["label"].lower())
-        follow = "; ".join(f"if {_reaction_text(r)} ({r['prob']*100:.0f}%): {r['best_next']['label'].lower()}"
-                           for r in best["reactions"][:2])
-        if best["action"] == "none":
-            summary = (f"Best now: wait — {best['p_buy_step']*100:.0f}% chance they buy without a nudge; no action "
-                       f"pays for itself yet. Then {follow}.")
-        else:
-            gain = best.get("gain_vs_nothing")
-            summary = (f"Best path: {best['label'].lower()}, then {follow}. Chance of buying on this path "
-                       f"{best['p_buy_path']*100:.0f}%"
-                       + (f" (waiting now, then the best next step: {base['p_buy_path']*100:.0f}%; nobody contacting "
-                          f"them at all: {pred['conversion_probability']*100:.0f}%)" if base else "")
-                       + (f", about ₹{gain:,.0f} more than waiting." if base and gain else "."))
-    return {"lead": {"user_id": user_id, "name": user["name"], "score": pred["lead_score"],
-                     "tier": pred["recommended_action"], "stage": stage, "probability": pred["conversion_probability"],
-                     "course": catalog.title_of(slug) if slug else None, "price": price},
-            "steps": steps, "blocked": {a: blocked[a] for a in N.ACTION_LIST if blocked[a]},
-            "best": best["action"] if best else None, "summary": summary,
-            "history": {"decisions": jm.get("decisions", 0), "stage_decisions": (jm["stages"].get(stage) or {}).get("n", 0),
-                        "built_at": jm.get("built_at")},
-            "note": ("Chances come from the lead model and the next-best-action model for this person; reactions are "
-                     "what history shows for leads in the same stage (weighted by how likely each logged decision "
-                     "was). Estimates, not guarantees.")}
+        o = by_action[a1]
+        mix, evidence = _reaction_mix(jm, stage, a1)
+        reactions = []
+        if mix:
+            for r in STEP_REACTIONS + ["bought"]:
+                pr = float(mix.get(r, 0.0))
+                if r == "clicked" and N.ACTIONS[a1]["channel"] not in ("email", "whatsapp"):
+                    pr = 0.0
+                if pr <= 0.004:
+                    continue
+                if r == "bought":
+                    reactions.append({"reaction": r, "label": J.REACTION_LABELS[r], "prob": pr, "next": None,
+                                      "best_next": None})
+                    continue
+                nxt = follow_up(r, o["discount"])
+                reactions.append({"reaction": r, "label": J.REACTION_LABELS[r], "prob": pr,
+                                  "next": {"score": after[r]["score"], "tier": after[r]["tier"],
+                                           "stage": after[r]["stage"],
+                                           "stage_label": STAGE_LABELS.get(after[r]["stage"], after[r]["stage"])},
+                                  "best_next": nxt})
+            total = sum(x["prob"] for x in reactions) or 1.0
+            for x in reactions:
+                x["prob"] = x["prob"] / total
+            reactions.sort(key=lambda x: -x["prob"])
+        steps.append({"action": a1, "label": o["label"], "cost": o["cost"], "discount": o["discount"],
+                      "p_buy_step": o["p_convert"], "uplift": o["uplift"], "extra_profit": o["incremental_profit"],
+                      "reactions": reactions, "evidence": {**evidence, "stage": stage,
+                                                           "stage_label": STAGE_LABELS.get(stage, stage)}})
+    # same order as the recommendation: the pick first, then by extra profit now
+    steps.sort(key=lambda s: (s["action"] != best, -s["extra_profit"]))
+
+    rec = now["recommendation"]
+    first = steps[0] if steps else None
+    summary = f"Recommended now: {rec['label']} — {rec['why']}"
+    if first and first["reactions"]:
+        likely = [x for x in first["reactions"] if x["reaction"] != "bought"][:2]
+        if likely:
+            summary += " Then: " + "; ".join(
+                f"if they {'come back' if x['reaction'] == 'engaged' else 'add to cart or enquire' if x['reaction'] == 'advanced' else 'click' if x['reaction'] == 'clicked' else 'do nothing'}"
+                f" ({x['prob'] * 100:.0f}%): {x['best_next']['label']}" for x in likely) + "."
+    blocked = {o["action"]: o["blocked"] for o in now["options"] if o["blocked"]}
+    return {"lead": {**lead_info, "score": now["score"], "tier": now["tier"], "stage": stage,
+                     "stage_label": STAGE_LABELS.get(stage, stage), "probability": now["probability"],
+                     "course": now["course"]["title"], "price": price, "away_days": now.get("away_days")},
+            "steps": steps, "blocked": blocked, "best": best, "recommendation": rec, "summary": summary,
+            "history": {"decisions": jm.get("decisions", 0),
+                        "stage_decisions": ((jm.get("stages") or {}).get(stage) or {}).get("n", 0),
+                        "built_at": jm.get("built_at"), "min_history": MIN_HISTORY},
+            "note": ("Step 1 uses the same numbers and the same rule as the Recommended action tab (highest extra "
+                     "profit now). Reactions are what learners in the same stage did in the next 3 days after the same "
+                     "step in the CRM's history, weighted by how likely each logged decision was. Estimates, not "
+                     "guarantees.")}

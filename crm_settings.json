@@ -43,7 +43,7 @@
     "live": {"job_every": 5, "visit_ended": 15, "cart_abandoned": 60, "checkout_abandoned": 30, "wishlist": 30}
   },
   "cooldown_hours": {"visit": 6, "cart": 12, "checkout": 12, "wishlist": 24},
-  "decay_inactive_minutes": {"demo": 10, "live": 10080},
+  "score_refresh_minutes": {"_about": "How often every lead is re-scored with the current model and the time since their last visit (also at start-up and right after the learning loop switches models).", "demo": 5, "live": 60},
 
   "learning": {
     "_about": "The automatic learning loop. A new model replaces the old one only if it predicts the untouched control group (global_control) better in at least swap_confidence of the bootstrap resamples.",
@@ -75,9 +75,17 @@
   },
 
   "starting_history": {
-    "_about": "On the first start, start-all.bat creates 6 simulated months of learners (marked 'simulated') so the dashboards and the learning loop have history. Delete it with: python ml/generate_history.py --remove",
+    "_about": "On the first start, start-all.bat creates 6 months of history for 2,000 simulated learners (addresses @demo.xeducation.test, never e-mailed, tagged 'simulated' in the dashboard), so the CRM has data to learn from on day one. Delete it with: python ml/generate_history.py --remove",
     "create_on_first_start": true,
     "learners": 2000,
     "days": 180
+  },
+
+  "live_simulation": {
+    "_about": "While the servers run, the simulated learners keep using the website in real time (ml/live_simulation.py): they come back, react to the CRM's real e-mails, coupons, calls and WhatsApp messages, and buy through the same API a browser uses; new ones sign up every day. A simulated advisor handles their call/WhatsApp tasks (advisor_hours after the task is created) unless you do it first; real people's tasks are never touched. enabled=false stops them (the Dashboard can also pause them).",
+    "enabled": true,
+    "new_signups_per_day": 13,
+    "advisor_hours": [1, 24],
+    "tick_seconds": 10
   }
 }

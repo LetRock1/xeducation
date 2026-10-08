@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Sankey, Tooltip, ResponsiveContainer, Layer, Rectangle } from 'recharts'
 import { getJourneys } from '../utils/api'
+import { stageLabel } from '../utils/labels'
 
 const TIP = { background:'#0B1426', border:'1px solid rgba(255,255,255,0.1)', borderRadius:12, color:'#e2e8f0' }
 const TIERS = ['', 'Target Immediately', 'Nurture via Email/WhatsApp', 'Marketing Campaign', 'Low Priority']
@@ -18,7 +19,7 @@ function Node({ x, y, width, height, index, payload, containerWidth }) {
     <Layer key={`n${index}`}>
       <Rectangle x={x} y={y} width={width} height={height} fill={color} fillOpacity={payload.name === 'Bought' ? 1 : 0.85} radius={2} />
       <text textAnchor={isOut ? 'end' : 'start'} x={isOut ? x - 6 : x + width + 6} y={y + height / 2} fontSize={12} fill="#e2e8f0" dominantBaseline="middle">
-        {payload.name} <tspan fill="#94a3b8">({payload.value})</tspan>
+        {payload.layer === 'stage' ? stageLabel(payload.name) : payload.name} <tspan fill="#94a3b8">({payload.value})</tspan>
       </text>
     </Layer>
   )
@@ -56,7 +57,9 @@ export default function Journeys() {
         <div>
           <h1 className="font-display text-3xl font-extrabold text-white">Journeys</h1>
           <p className="text-slate-400 text-sm mt-1 max-w-3xl">What happened to past leads: the stage they were in, what the team did, how they
-            reacted in the next 3 days and whether they bought. This history is what the what-if paths on each lead learn from.</p>
+            reacted in the next 3 days and whether they bought. This history is what the what-if paths on each lead learn from.
+            It covers everyone, simulated learners included. Stages are the standard CRM ones: MQL = marketing-qualified (showed interest),
+            SQL = sales-qualified (ready to buy).</p>
         </div>
         <div className="flex gap-2">
           <select value={days} onChange={e => setDays(Number(e.target.value))} className="inp !w-auto !py-2">
@@ -79,7 +82,7 @@ export default function Journeys() {
             <div className="space-y-2">
               {funnel.map((s, i) => (
                 <div key={s.stage} className="flex items-center gap-3">
-                  <div className="w-24 text-sm text-white font-semibold">{s.stage}</div>
+                  <div className="w-32 text-sm text-white font-semibold">{stageLabel(s.stage)}</div>
                   <div className="flex-1 bg-white/5 rounded-lg h-8 overflow-hidden">
                     <div className="h-8 rounded-lg flex items-center px-3 text-xs text-navy font-bold"
                       style={{ width: `${top ? Math.max(4, (s.people / top) * 100) : 0}%`, background: i === funnel.length - 1 ? '#22c55e' : '#38BDF8' }}>
@@ -133,7 +136,7 @@ export default function Journeys() {
                 <thead><tr className="text-slate-500 text-left"><th className="py-1">Path</th><th>n</th><th>Bought</th><th>Fair rate</th></tr></thead>
                 <tbody>{(data.top_paths || []).map((p, i) => (
                   <tr key={i} className="border-t border-white/5 text-slate-300">
-                    <td className="py-1.5"><span className="text-sky-accent">{p.stage}</span> → {p.action_label} → <span className="text-violet-300">{p.reaction_label}</span></td>
+                    <td className="py-1.5"><span className="text-sky-accent">{stageLabel(p.stage)}</span> → {p.action_label} → <span className="text-violet-300">{p.reaction_label}</span></td>
                     <td>{p.n}</td><td className="text-green-400">{pct(p.conversion)}</td><td>{pct(p.conversion_weighted)}</td>
                   </tr>))}
                 </tbody>
@@ -147,7 +150,7 @@ export default function Journeys() {
                 <thead><tr className="text-slate-500 text-left"><th className="py-1">Stage</th><th>Step</th><th>n</th><th>Bought</th><th>vs nothing</th></tr></thead>
                 <tbody>{(data.action_effects || []).sort((a, b) => b.lift - a.lift).map((e, i) => (
                   <tr key={i} className="border-t border-white/5 text-slate-300">
-                    <td className="py-1.5">{e.stage}</td><td>{e.label}</td><td>{e.n}</td><td>{pct(e.rate)}</td>
+                    <td className="py-1.5">{stageLabel(e.stage)}</td><td>{e.label}</td><td>{e.n}</td><td>{pct(e.rate)}</td>
                     <td className={e.lift >= 0 ? 'text-green-400' : 'text-red-400'}>{e.lift >= 0 ? '+' : ''}{(e.lift * 100).toFixed(1)} pts</td>
                   </tr>))}
                 </tbody>

@@ -10,7 +10,7 @@ for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
 import re
 import sqlite3
 import uuid
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -30,6 +30,7 @@ from scheduler       import start_scheduler
 from outreach        import send_tracked_email
 from playbook        import handle_trigger
 import perf
+import settings
 
 load_dotenv()
 app = FastAPI(title="X Education User API", version="2.0.0")
@@ -194,6 +195,11 @@ def signup(body: SignupRequest):
     auth.save_otp(body.email, otp)
     ok, msg = send_otp_email(body.email, otp, body.name)
     if not ok:
+        if settings.DEMO_MODE:
+            # a live demo must not stop because Gmail is unreachable: the code is shown in this window
+            print(f"[DEMO] Could not e-mail the sign-up code to {body.email} ({msg}). Code: {otp}")
+            return {"message": "We couldn't e-mail your code just now. In demo mode the code is shown in the "
+                               "user-backend window."}
         if created:
             db.execute("DELETE FROM users WHERE id=?", (user_id,))
         raise HTTPException(500, f"Could not send OTP: {msg}")
@@ -270,6 +276,10 @@ def resend_otp(body: EmailOnly):
     auth.save_otp(email, otp, "signup")
     ok, msg = send_otp_email(email, otp, user["name"])
     if not ok:
+        if settings.DEMO_MODE:
+            print(f"[DEMO] Could not e-mail the sign-up code to {email} ({msg}). Code: {otp}")
+            return {"message": "We couldn't e-mail your code just now. In demo mode the code is shown in the "
+                               "user-backend window."}
         raise HTTPException(500, f"Could not send OTP: {msg}")
     return {"message": f"A new code has been sent to {email}."}
 
@@ -420,6 +430,46 @@ def track_event(body: BehaviourEvent, user=Depends(get_current_user)):
             "tier": pred["recommended_action"]}
 
 
+# ── EMAIL LINKS (click and unsubscribe, reported by the website) ─────────────────
+# Every marketing email's "View Course" button opens <site>/courses/<slug>?ref=<token>: the course the
+# person looked at, on our own website. The page reports the click here, logged in or not (the token
+# identifies the email), so the click is tied to that exact email and the lead is re-scored at once.
+TOKEN_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+class EmailToken(BaseModel):
+    token: str
+
+
+@app.post("/api/email/click")
+def email_click(body: EmailToken):
+    token = (body.token or "").strip().lower()
+    if not TOKEN_RE.match(token):
+        raise HTTPException(400, "Invalid link.")
+    send = db.get_email_send_by_token(token)
+    if not send:
+        return {"ok": False, "message": "Unknown email link."}
+    first = not send.get("first_clicked_at")
+    db.execute("""UPDATE email_sends SET click_count = click_count + 1, open_count = open_count + 1,
+                  opened_at = COALESCE(opened_at, datetime('now','localtime')),
+                  first_clicked_at = COALESCE(first_clicked_at, datetime('now','localtime'))
+                  WHERE token=?""", (token,))
+    if send.get("user_id"):
+        rescore_latest_lead(send["user_id"], "email_click")
+    return {"ok": True, "first_click": first}
+
+
+@app.post("/api/email/unsubscribe")
+def email_unsubscribe(body: EmailToken):
+    token = (body.token or "").strip().lower()
+    send = db.get_email_send_by_token(token) if TOKEN_RE.match(token) else None
+    if not send or not send.get("user_id"):
+        raise HTTPException(404, "This unsubscribe link is not valid any more.")
+    db.execute("INSERT OR IGNORE INTO user_profiles (user_id) VALUES (?)", (send["user_id"],))
+    db.execute("UPDATE user_profiles SET do_not_email='Yes' WHERE user_id=?", (send["user_id"],))
+    return {"ok": True, "message": "You've been unsubscribed from X Education marketing emails."}
+
+
 @app.get("/api/live-score")
 def get_live_score(user=Depends(get_current_user)):
     row = db.fetchone("SELECT live_score, persona FROM live_user_state WHERE user_id=?", (user["id"],))
@@ -427,6 +477,20 @@ def get_live_score(user=Depends(get_current_user)):
         return {"lead_score": row["live_score"], "persona": row["persona"]}
     pred = score_user(user["id"], source="live_score", snapshot_gap_minutes=60)
     return {"lead_score": pred["lead_score"], "persona": pred["persona"]}
+
+
+class SessionPing(BaseModel):
+    session_id: int
+
+
+@app.post("/api/session/ping")
+def session_ping(body: SessionPing, user=Depends(get_current_user)):
+    """'Still here' from the website every 30 s while the learner is using the page (tracker.js). Nothing is
+    recorded as an event; only the visit's last-active time moves, so the CRM does not take a long read for a
+    visit that has ended (its 'visit ended' follow-up waits until the learner has really left)."""
+    db.execute("UPDATE user_sessions SET last_active=datetime('now','localtime') WHERE id=? AND user_id=?",
+               (body.session_id, user["id"]))
+    return {"ok": True}
 
 
 @app.post("/api/session/start")
@@ -562,7 +626,7 @@ def check_coupon(body: CouponCheck, user=Depends(get_current_user)):
 
 
 @app.post("/api/checkout")
-def checkout(body: CheckoutRequest, user=Depends(get_current_user)):
+def checkout(body: CheckoutRequest, background: BackgroundTasks, user=Depends(get_current_user)):
     cart = db.get_cart(user["id"])
     if not cart:
         raise HTTPException(400, "Your cart is empty.")
@@ -617,9 +681,9 @@ def checkout(body: CheckoutRequest, user=Depends(get_current_user)):
     # ── Attributed, properly-branded purchase confirmation email ──
     channel = prior_lead["trigger_reason"] if prior_lead else None
     channel_label = ATTRIBUTION_LABELS.get(channel, ATTRIBUTION_LABELS[None])
-    send_purchase_confirmation_email(
-        user["email"], user["name"], purchased, channel_label, total_paid, discount_pct
-    )
+    # sent after the reply, so the learner never waits for Gmail
+    background.add_task(send_purchase_confirmation_email,
+                        user["email"], user["name"], purchased, channel_label, total_paid, discount_pct)
 
     return {
         "message": "Purchase successful! Great! Welcome to X Education.",
@@ -889,10 +953,12 @@ def internal_learn(dry_run: bool = False, x_internal_key: str = Header(None)):
 def internal_learning_status(x_internal_key: str = Header(None)):
     _internal(x_internal_key)
     import learning
+    import scoring
     ok, known, new = learning.due()
     return {"outcomes_known": known, "new_outcomes": new, "due": ok,
             "min_new_outcomes": learning.CONF.get("min_new_outcomes"), "latency": perf.summary(),
-            "model": model_info()}
+            "model": model_info(), "score_refresh": scoring.last_refresh(),
+            "score_refresh_minutes": int(settings.by_mode("score_refresh_minutes"))}
 
 
 @app.get("/api/internal/paths/{user_id}")
@@ -926,3 +992,125 @@ def internal_pipeline(limit: int = 40, search: str = None, include_simulated: bo
 def internal_latency(x_internal_key: str = Header(None)):
     _internal(x_internal_key)
     return perf.summary()
+
+
+# ── LEAD PAGE: what the CRM would do now, and "Do it now" ─────────────────────────
+@app.get("/api/internal/lead/{user_id}/now")
+def internal_lead_now(user_id: int, x_internal_key: str = Header(None)):
+    """The recommendation for this person right now (the same calculation as every automatic decision),
+    with fresh reasons for the score. Nothing is sent or logged."""
+    _internal(x_internal_key)
+    import nba
+    out = nba.recommend_now(user_id)
+    if out is None:
+        raise HTTPException(404, "User not found")
+    out.pop("features", None)
+    return out
+
+
+class ActRequest(BaseModel):
+    action: str
+
+
+@app.post("/api/internal/lead/{user_id}/act")
+def internal_lead_act(user_id: int, body: ActRequest, x_internal_key: str = Header(None)):
+    """Carry out one step now, chosen by a person on the team. It goes through the same code as an automatic
+    decision (email with or without coupon, or a call / WhatsApp task) and is logged as policy 'manual', so
+    the learning loop is told about it."""
+    _internal(x_internal_key)
+    import nba
+    import nba_core as N
+    user = db.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(404, "User not found")
+    if body.action not in N.ACTIONS or body.action == "none":
+        raise HTTPException(400, "Choose a step to take (an email, a call or WhatsApp).")
+    now = nba.recommend_now(user_id)
+    if now.get("recommendation") is None:
+        raise HTTPException(409, now.get("message") or "Nothing to do for this person.")
+    if now["control_group"]:
+        raise HTTPException(409, "This person is in the control group: the CRM never contacts them, so their outcome "
+                                 "shows what happens without us. Contacting them by hand would spoil that check.")
+    try:
+        lead_id, pred, decision = handle_trigger(user_id, user["name"], user["email"], "manual",
+                                                 now["course"]["slug"], force_action=body.action)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    act = decision["action"]
+    done = {"email_info": "Information email sent", "email_coupon_10": "Email with a 10% coupon sent",
+            "email_coupon_20": "Email with a 20% coupon sent", "call": "Call task added to Today's actions",
+            "whatsapp": "WhatsApp task added to Today's actions"}.get(act, "Done")
+    return {"ok": True, "message": done, "action": act, "lead_id": lead_id, "decision_id": decision["decision_id"],
+            "model_pick": decision["model_best"], "why": decision["why"]}
+
+
+@app.post("/api/internal/scores/refresh")
+def internal_refresh_scores(x_internal_key: str = Header(None)):
+    _internal(x_internal_key)
+    import scoring
+    return scoring.refresh_scores("requested")
+
+
+# ── SIMULATED LEARNERS, LIVE (ml/live_simulation.py) ────────────────────────────────────
+# They use the public API above like any browser; these internal routes only report on them, pause them,
+# send one to the website now, and let the simulated advisor close their call / WhatsApp tasks.
+class TaskDoneRequest(BaseModel):
+    outcome: str
+    done_by: Optional[str] = "simulated advisor"
+
+
+@app.post("/api/internal/tasks/{task_id}/done")
+def internal_task_done(task_id: int, body: TaskDoneRequest, x_internal_key: str = Header(None)):
+    """The simulated advisor closes a call / WhatsApp task of a SIMULATED learner, exactly as 'Spoke to them'
+    in Today's actions does. Real people's tasks are closed only by the team."""
+    _internal(x_internal_key)
+    task = db.fetchone("SELECT t.*, u.email FROM sales_tasks t JOIN users u ON u.id = t.user_id WHERE t.id=?", (task_id,))
+    if not task:
+        raise HTTPException(404, "Task not found")
+    if body.outcome not in ("reached", "no_answer", "not_interested", "sent"):
+        raise HTTPException(400, "Unknown outcome.")
+    if not settings.is_simulated_email(task["email"]):
+        raise HTTPException(403, "Tasks of real people are closed only by the team (Today's actions).")
+    if task["status"] != "open":
+        return {"ok": False, "message": "This task was already done."}
+    db.execute("""UPDATE sales_tasks SET status='done', outcome=?, done_at=datetime('now','localtime'), done_by=?
+                  WHERE id=? AND status='open'""", (body.outcome, (body.done_by or "simulated advisor")[:40], task_id))
+    if task["decision_id"] and body.outcome in ("reached", "sent", "not_interested"):
+        db.execute("UPDATE nba_decisions SET executed_at=COALESCE(executed_at, datetime('now','localtime')) WHERE id=?",
+                   (task["decision_id"],))
+    return {"ok": True}
+
+
+@app.get("/api/internal/simulation")
+def internal_simulation(x_internal_key: str = Header(None)):
+    _internal(x_internal_key)
+    from scheduler import simulation_module
+    return simulation_module().get_world().status()
+
+
+class SimVisitRequest(BaseModel):
+    kind: str = "returning"          # 'returning' (someone still deciding comes back) | 'signup' (a new person)
+
+
+@app.post("/api/internal/simulation/visit")
+def internal_simulation_visit(body: SimVisitRequest, x_internal_key: str = Header(None)):
+    _internal(x_internal_key)
+    from scheduler import simulation_module
+    sim = simulation_module()
+    try:
+        return sim.get_world().visit_now(kind=body.kind)
+    except sim.Paused as e:
+        raise HTTPException(409, str(e))
+    except sim.Offline as e:
+        raise HTTPException(503, f"The website's API did not answer: {e}")
+
+
+class SimSwitch(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/internal/simulation/enabled")
+def internal_simulation_enabled(body: SimSwitch, x_internal_key: str = Header(None)):
+    _internal(x_internal_key)
+    from scheduler import simulation_module
+    return simulation_module().get_world().set_enabled(body.enabled)

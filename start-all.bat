@@ -97,7 +97,7 @@ echo Waiting for user-backend (it creates the shared database)...
 set /a TRIES=0
 :wait_loop
 set /a TRIES+=1
-powershell -NoProfile -Command "try{Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 http://localhost:8000/api/health ^| Out-Null; exit 0}catch{exit 1}" >nul 2>&1
+powershell -NoProfile -Command "try{Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 http://127.0.0.1:8000/api/health ^| Out-Null; exit 0}catch{exit 1}" >nul 2>&1
 if not errorlevel 1 goto :backend_ready
 if %TRIES% GEQ 40 goto :backend_slow
 timeout /t 1 /nobreak >nul

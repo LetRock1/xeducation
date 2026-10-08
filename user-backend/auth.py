@@ -1,8 +1,12 @@
 """
 auth.py — OTP generation, JWT tokens, password hashing
 """
+import logging
 import os, random, string
 from datetime import datetime, timedelta
+# passlib 1.7.4 reads a version field that bcrypt 4.x no longer has and logs a harmless traceback
+# ("(trapped) error reading bcrypt version") at start-up; hashing works fine, so keep the console clean
+logging.getLogger("passlib").setLevel(logging.ERROR)
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from dotenv import load_dotenv
@@ -38,7 +42,8 @@ def decode_token(token: str) -> dict | None:
         return None
 
 def generate_otp() -> str:
-    return "".join(random.choices(string.digits, k=6))
+    import secrets
+    return "".join(secrets.choice(string.digits) for _ in range(6))   # unpredictable, unlike random
 
 MAX_OTP_ATTEMPTS = 5
 

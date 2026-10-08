@@ -23,12 +23,14 @@ from outreach import send_tracked_email
 from scoring import save_lead, score_user
 
 
-def handle_trigger(user_id, name, email, trigger, course_slug=None, allowed=None, always_email=False):
-    """Returns (lead_id, prediction, decision)."""
+def handle_trigger(user_id, name, email, trigger, course_slug=None, allowed=None, always_email=False,
+                   force_action=None):
+    """Returns (lead_id, prediction, decision). force_action: a step chosen by hand ("Do it now" on the lead
+    page, trigger 'manual'); it is carried out and logged exactly like an automatic one."""
     started = time.perf_counter()
     profile = db.get_profile(user_id) or {}
     pred = score_user(user_id, source=trigger, course=course_slug, explain=True)
-    decision = nba.decide(user_id, trigger, pred, course_slug=course_slug, allowed=allowed)
+    decision = nba.decide(user_id, trigger, pred, course_slug=course_slug, allowed=allowed, force_action=force_action)
     action = decision["action"]
     title = catalog.title_of(course_slug, "our programmes") if course_slug else "our programmes"
     is_email = action.startswith("email")

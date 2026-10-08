@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getPipeline, moveCard, resetCard } from '../utils/api'
+import { stageLabel, STAGE_HELP } from '../utils/labels'
 
 const STAGE_COLOR = {
   Lead: 'border-slate-500/40', Engaged: 'border-sky-500/40', MQL: 'border-violet-500/40',
@@ -44,14 +45,14 @@ export default function Pipeline() {
     if (card.stage === 'Customer') { setMsg('This person has bought — customers stay customers.'); return }
     try {
       await moveCard(card.user_id, { stage })
-      setMsg(`${card.name} moved to ${stage} by hand. The CRM's own view is still shown on the card ("auto: ${card.auto_stage}").`)
+      setMsg(`${card.name} moved to ${stageLabel(stage)} by hand. The CRM's own view is still shown on the card ("auto: ${stageLabel(card.auto_stage)}").`)
       load()
     } catch (e) { setMsg(e.response?.data?.detail || 'Could not move the card') }
   }
 
   async function auto(card) {
     await resetCard(card.user_id).catch(() => {})
-    setMsg(`${card.name} follows the CRM's stage again (${card.auto_stage}).`)
+    setMsg(`${card.name} follows the CRM's stage again (${stageLabel(card.auto_stage)}).`)
     load()
   }
 
@@ -70,8 +71,8 @@ export default function Pipeline() {
         </div>
         <div className="flex items-center gap-2">
           <input className="inp w-56 py-2" placeholder="Search name or email" value={search} onChange={e => setSearch(e.target.value)} />
-          <label className="flex items-center gap-2 text-xs text-slate-400 bg-white/5 border border-white/10 rounded-xl px-3 py-2 cursor-pointer">
-            <input type="checkbox" checked={simulated} onChange={e => setSimulated(e.target.checked)} /> simulated history
+          <label className="flex items-center gap-2 text-xs text-slate-400 bg-white/5 border border-white/10 rounded-xl px-3 py-2 cursor-pointer whitespace-nowrap">
+            <input type="checkbox" checked={simulated} onChange={e => setSimulated(e.target.checked)} /> include simulated learners
           </label>
         </div>
       </div>
@@ -93,11 +94,11 @@ export default function Pipeline() {
               <div className="px-2 pt-1 pb-2">
                 <div className="flex items-center justify-between">
                   <p className="font-display font-semibold text-white text-sm flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${STAGE_DOT[col.stage]}`} />{col.stage}
+                    <span className={`w-2 h-2 rounded-full ${STAGE_DOT[col.stage]}`} />{stageLabel(col.stage)}
                   </p>
                   <span className="text-xs text-slate-400">{col.count.toLocaleString()}</span>
                 </div>
-                <p className="text-[10px] text-slate-500 leading-snug mt-1" title={col.about}>{col.about}</p>
+                <p className="text-[10px] text-slate-500 leading-snug mt-1" title={col.about}>{STAGE_HELP[col.stage] || col.about}</p>
                 {col.stage !== 'Customer'
                   ? <p className="text-[11px] text-slate-400 mt-1">{inr(col.expected_value)} expected</p>
                   : <p className="text-[11px] text-slate-400 mt-1">bought</p>}
@@ -109,13 +110,15 @@ export default function Pipeline() {
                     className={`bg-[#0B1426] border-l-2 ${STAGE_COLOR[c.stage]} border border-white/10 rounded-xl p-3 cursor-grab active:cursor-grabbing`}>
                     <div className="flex items-start justify-between gap-2">
                       <Link to={`/leads/${c.lead_id}`} className="text-white text-sm font-semibold hover:underline leading-tight">{c.name}</Link>
-                      <span className="text-xs font-mono text-white bg-white/10 rounded px-1.5">{Math.round(c.score)}</span>
+                      {c.stage === 'Customer'
+                        ? <span className="text-xs text-green-400 bg-green-500/10 rounded px-1.5" title="Customers are not scored">✓</span>
+                        : <span className="text-xs font-mono text-white bg-white/10 rounded px-1.5" title="Chance (%) to buy within 14 days if we do nothing">{Math.round(c.score)}</span>}
                     </div>
                     <p className="text-[11px] text-slate-500 truncate">{c.course || '—'}</p>
                     <div className="flex flex-wrap gap-1 mt-2">
                       {c.simulated && <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-slate-500">simulated</span>}
                       {c.control_group && <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300" title="5% of leads the CRM never contacts automatically: its honest check">control group</span>}
-                      {c.moved_by_hand && <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300" title={c.override_note || ''}>moved by hand · auto: {c.auto_stage}</span>}
+                      {c.moved_by_hand && <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300" title={c.override_note || ''}>moved by hand · auto: {stageLabel(c.auto_stage)}</span>}
                     </div>
                     <p className="text-[10px] text-slate-500 mt-2">
                       Last seen {ago(c.last_seen)}{c.last_action_label ? ` · last step: ${c.last_action_label.toLowerCase()}` : ''}

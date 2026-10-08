@@ -256,7 +256,7 @@ class Copilot:
         if top:
             text += " Top courses: " + ", ".join(f"{t} ({k})" for t, k in top) + "."
         if sim:
-            text += f" ({sim:,} of these are from the simulated history.)"
+            text += f" ({sim:,} of these are simulated learners.)"
         return text, facts, "purchases", []
 
     def campaigns(self):

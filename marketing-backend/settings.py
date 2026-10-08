@@ -35,7 +35,7 @@ DEFAULTS = {
         "live": {"job_every": 5, "visit_ended": 15, "cart_abandoned": 60, "checkout_abandoned": 30, "wishlist": 30},
     },
     "cooldown_hours": {"visit": 6, "cart": 12, "checkout": 12, "wishlist": 24},
-    "decay_inactive_minutes": {"demo": 10, "live": 10080},
+    "score_refresh_minutes": {"demo": 5, "live": 60},
     "learning": {"check_every_minutes": {"demo": 5, "live": 60}, "min_new_outcomes": 30, "swap_confidence": 0.90,
                  "ridge": 2.0, "bootstrap_resamples": 300},
     "ab_testing": {"control_share": 0.20, "alpha": 0.05, "power": 0.80, "min_detectable_effect": 0.05,
@@ -44,7 +44,17 @@ DEFAULTS = {
     "campaigns": {"holdout_share": 0.10},
     "global_control": {"share": 0.05},
     "starting_history": {"create_on_first_start": True, "learners": 2000, "days": 180},
+    "live_simulation": {"enabled": True, "new_signups_per_day": 13, "advisor_hours": [1, 24], "tick_seconds": 10},
 }
+
+# Simulated learners (the starting history and the live simulation) have addresses on this reserved
+# domain: they are never e-mailed, and the dashboard tags them "simulated". Everything else treats them
+# exactly like people who signed up themselves.
+SIMULATED_DOMAIN = "demo.xeducation.test"
+
+
+def is_simulated_email(email):
+    return (email or "").strip().lower().endswith("@" + SIMULATED_DOMAIN)
 
 
 def _merge(base, extra):
@@ -76,7 +86,7 @@ MODE = "demo" if DEMO_MODE else "live"
 
 
 def by_mode(section):
-    """A value that differs between demo mode and live mode, e.g. by_mode('decay_inactive_minutes')."""
+    """A value that differs between demo mode and live mode, e.g. by_mode('score_refresh_minutes')."""
     v = S[section]
     return v[MODE] if isinstance(v, dict) and MODE in v else v
 

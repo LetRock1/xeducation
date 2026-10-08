@@ -68,12 +68,18 @@ export default function Learning() {
   const lat = st?.latency || {}
   const lm = data.lead_model || {}
   const learned = (lm.learned_signals || []).filter(s => Math.abs(s.points) >= 0.1).sort((a, b) => b.points - a.points)
-  const history = [...runs].reverse().map(r => {
+  const byDay = new Map()                      // one point per day (the latest run of that day)
+  for (const r of [...runs].reverse()) {
     const c = r.learned?.control || {}
     const p = c.predicted || {}
-    return { date: day(r.as_of), actual: c.actual != null ? +(c.actual * 100).toFixed(1) : null,
-      ours: p.challenger != null ? +(p.challenger * 100).toFixed(1) : null, naive: p.naive != null ? +(p.naive * 100).toFixed(1) : null }
-  }).filter(h => h.actual != null)
+    if (c.actual == null) continue
+    byDay.set(day(r.as_of), { date: day(r.as_of), actual: +(c.actual * 100).toFixed(1),
+      ours: p.challenger != null ? +(p.challenger * 100).toFixed(1) : null, naive: p.naive != null ? +(p.naive * 100).toFixed(1) : null })
+  }
+  const history = [...byDay.values()]
+  const latRows = [['event_to_score', 'Event → new score'], ['trigger_to_action', 'Trigger → action taken']].filter(([k]) => lat[k])
+  const feed = data.feed || []
+  const sr = st?.score_refresh
   const ctl = last?.learned?.control || {}
   const own = (lm.own_effects || []).filter(e => Math.abs(e.points) >= 0.1 && !e.input.startsWith('away'))
   const imp = data.impact
@@ -100,9 +106,12 @@ export default function Learning() {
         <div className={`card p-4 mb-6 text-sm ${result.ok ? 'text-slate-300' : 'text-red-400'}`}>
           {result.ok ? (
             <>
-              <p className="font-semibold text-white">{result.status === 'dry_run' ? 'Dry run finished (nothing replaced).' : `Learning run ${result.run_id ?? ''} finished.`}</p>
-              <p className="mt-1">{result.outcomes_known} decisions with an outcome · {result.control_people ?? 0} control-group people ·
-                lead model: <Chip d={result.lead_decision} /> · next-best-action: <Chip d={result.nba?.decision} /></p>
+              <p className="font-semibold text-white">{result.status === 'dry_run' ? 'Dry run finished (nothing replaced).'
+                : result.status === 'nothing_new' ? 'Nothing new to learn yet.' : result.status === 'busy' ? 'A learning run is already in progress.'
+                : `Learning run ${result.run_id ?? ''} finished.`}</p>
+              {result.status === 'nothing_new' ? <p className="mt-1 text-slate-400">{result.message}</p> : result.status !== 'busy' && (
+              <p className="mt-1">{num(result.outcomes_known)} decision points with a known outcome · {result.control_people ?? 0} control-group people with a known outcome ·
+                lead model: <Chip d={result.lead_decision} /> · next-best-action: <Chip d={result.nba?.decision} /></p>)}
               {result.note && <p className="text-slate-400 text-xs mt-1">{result.note}</p>}
               {result.nba?.note && <p className="text-slate-400 text-xs mt-1">Next-best-action: {result.nba.note}</p>}
             </>
@@ -113,15 +122,16 @@ export default function Learning() {
       {/* The loop, live */}
       <div className="flex flex-wrap items-stretch gap-2 mb-2">
         <Step icon="👀" title="1 · Watch" value={num(c.events_today)} sub="website events today (video, pricing, cart …)" />
-        <Step icon="🎯" title="2 · Score" value={num(c.scored_today)} sub="re-scores today — every event updates the score" />
-        <Step icon="🧠" title="3 · Decide" value={num(c.decisions_total)} sub={`decisions · ${pct(c.decisions_total ? c.decisions_random / c.decisions_total : null)} random (to learn) · ${num(c.decisions_today)} today`} />
-        <Step icon="✉️" title="4 · Act & observe" value={num(c.purchases_total)} sub={`purchases · ${num(c.control_group)} people in the untouched control group · ${num(c.emails_today)} emails today`} />
+        <Step icon="🎯" title="2 · Score" value={num(c.scored_today)} sub={`re-scores today — every event updates the score${sr ? `; everyone re-scored ${String(sr.at || '').slice(11, 16)} (${sr.model_version})` : ''}`} />
+        <Step icon="🧠" title="3 · Decide" value={num(c.decisions_total)} sub={`next-best-action decisions · ${pct(c.decisions_total ? c.decisions_random / c.decisions_total : null)} random (to learn) · ${num(c.decisions_today)} today`} />
+        <Step icon="✉️" title="4 · Act & observe" value={num(c.purchases_total)} sub={`purchases · ${num(c.control_group)} people in the untouched control group (never contacted) · ${num(c.emails_today)} emails today`} />
         <Step icon="🔁" title="5 · Learn" highlight value={last ? day(last.as_of) : 'not yet'}
-          sub={last ? `last run: lead model ${DECISION[last.lead_decision]?.text || last.lead_decision}${st ? ` · ${st.new_outcomes} new outcomes (runs at ${st.min_new_outcomes})` : ''}`
-            : `runs when ${data.settings.min_new_outcomes}+ outcomes are known`} />
+          sub={last ? `last run: lead model ${DECISION[last.lead_decision]?.text || last.lead_decision}${st ? ` · next run by itself after ${Math.max(0, st.min_new_outcomes - st.new_outcomes)} more outcomes (${st.new_outcomes}/${st.min_new_outcomes})` : ''}`
+            : `runs by itself when ${data.settings.min_new_outcomes}+ outcomes are known`} />
       </div>
-      <p className="text-slate-500 text-xs mb-8">↻ What step 5 learns goes straight back into step 2. Outcome = bought within {data.settings.window_days} days.
+      <p className="text-slate-500 text-xs mb-2">↻ What step 5 learns goes straight back into step 2: after a model switch every lead is re-scored by itself. Outcome = bought within {data.settings.window_days} days.
         {' '}Exploration {pct(data.settings.exploration_rate)} · swap only when better in ≥ {pct(data.settings.swap_confidence)} of resamples.</p>
+      <p className="text-slate-500 text-xs mb-8">One pool of learners: {num(c.simulated_people)} simulated (the 6-month starting history and the ones who keep using the website live) and {num(c.real_people)} who signed up themselves. The loop learns from all of them the same way. Runs made while the starting history was generated are marked “simulated history” below.</p>
 
       <div className="grid lg:grid-cols-2 gap-6 mb-6">
         {/* Is it fooling itself? */}
@@ -147,7 +157,7 @@ export default function Learning() {
                 <div className="bg-white/5 rounded-xl p-3">
                   <p className="text-slate-500 text-[11px] uppercase tracking-wide">They actually bought</p>
                   <p className="font-display text-3xl font-extrabold text-green-400">{pct(ctl.actual, 1)}</p>
-                  <p className="text-slate-500 text-[11px]">{num(ctl.people)} people, {num(last.random_slice)} decisions</p>
+                  <p className="text-slate-500 text-[11px]">{num(ctl.people)} control people with a known outcome ({num(last.random_slice)} decision points)</p>
                 </div>
               </div>
               {ctl.actual > 0 && ctl.predicted?.naive != null && <p className="text-slate-300 text-sm mb-2">A normal retrain overstates leads by{' '}
@@ -193,6 +203,13 @@ export default function Learning() {
               </BarChart>
             </ResponsiveContainer>
           )}
+          {learned.some(e => e.signal === 'EmailEngagement' && e.points < 0) && (
+            <p className="text-slate-500 text-[11px] mt-2">“Clicked our emails” comes out negative: people who keep getting follow-ups without buying stay in the
+              data longer and collect clicks, so clicks look worse than they are. The score therefore never lets a click lower someone's chance (a click
+              counts at least zero).</p>
+          )}
+          <p className="text-slate-500 text-[11px] mt-2">These are corrections on top of the base model, learned from this CRM's own outcomes; the base model
+            already counts every signal. Time since the last visit is learned the same way and lowers the score when someone goes quiet.</p>
         </div>
       </div>
 
@@ -259,6 +276,7 @@ export default function Learning() {
         {/* Runs */}
         <div className="card p-6 lg:col-span-2">
           <h2 className="font-display text-lg font-bold text-white mb-3">Learning runs</h2>
+          <p className="text-slate-500 text-xs mb-3">“Outcomes” = decision points whose 14-day result is known (next-best-action decisions plus campaign and A/B emails). “Control group” = decision points of people the CRM never contacts.</p>
           {runs.length === 0 ? <p className="text-slate-400 text-sm">No runs yet. The loop runs automatically when {data.settings.min_new_outcomes}+ new outcomes are known, or press “Retrain now”.</p> : (
             <div className="overflow-x-auto max-h-96 overflow-y-auto">
               <table className="w-full text-xs">
@@ -267,7 +285,7 @@ export default function Learning() {
                   <th className="pr-3">Lead model</th><th className="pr-3">Next-best-action</th><th>Why</th></tr></thead>
                 <tbody>{runs.map(r => (
                   <tr key={r.id} className="border-t border-white/5 text-slate-300 align-top">
-                    <td className="py-1.5 pr-3 whitespace-nowrap">{day(r.as_of)}{r.simulated ? <span className="block text-[10px] text-slate-500">simulated</span> : null}</td>
+                    <td className="py-1.5 pr-3 whitespace-nowrap">{day(r.as_of)}{r.simulated ? <span className="block text-[10px] text-slate-500" title="Run while the 6-month starting history was generated">simulated history</span> : null}</td>
                     <td className="pr-3">{num(r.outcomes_known)}<span className="block text-[10px] text-slate-500">+{num(r.new_outcomes)} new</span></td>
                     <td className="pr-3">{num(r.random_slice)}<span className="block text-[10px] text-slate-500">{num(r.random_slice_buyers)} bought</span></td>
                     <td className="pr-3"><Chip d={r.lead_decision} />{r.lead_prob_better != null && <span className="block text-[10px] text-slate-500 mt-0.5">better in {pct(r.lead_prob_better)}</span>}</td>
@@ -284,11 +302,11 @@ export default function Learning() {
         <div className="space-y-6">
           <div className="card p-6">
             <h2 className="font-display text-lg font-bold text-white mb-3">Real-time</h2>
-            {Object.keys(lat).length === 0 ? <p className="text-slate-400 text-sm">Response times appear after the first tracked events.</p> : (
+            {latRows.length === 0 ? <p className="text-slate-400 text-sm">Response times appear after the first website events since the server started (open the website and click around).</p> : (
               <table className="w-full text-xs">
                 <thead><tr className="text-slate-500 text-left"><th className="py-1">Step</th><th>Median</th><th>95%</th><th>n</th></tr></thead>
                 <tbody>
-                  {[['event_to_score', 'Event → new score'], ['trigger_to_action', 'Trigger → action taken']].map(([k, label]) => lat[k] && (
+                  {latRows.map(([k, label]) => (
                     <tr key={k} className="border-t border-white/5 text-slate-300"><td className="py-1.5">{label}</td><td>{lat[k].median_ms} ms</td><td>{lat[k].p95_ms} ms</td><td>{lat[k].count}</td></tr>
                   ))}
                 </tbody>
@@ -297,13 +315,18 @@ export default function Learning() {
             {!st && <p className="text-slate-500 text-[11px] mt-2">User backend not reachable — live counts still work.</p>}
           </div>
           <div className="card p-6">
-            <h2 className="font-display text-lg font-bold text-white mb-3">Live activity</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-lg font-bold text-white">Live activity</h2>
+              <span className="text-[11px] text-slate-500">everyone · simulated learners tagged</span>
+            </div>
             <div className="space-y-1.5 max-h-72 overflow-y-auto">
-              {(data.feed || []).map((f, i) => (
+              {feed.length === 0 && <p className="text-slate-500 text-xs">No activity yet. Open the website, sign up and click around: it appears here within seconds.</p>}
+              {feed.map((f, i) => (
                 <div key={i} className="text-xs text-slate-400 flex gap-2">
                   <span className="text-slate-600 w-28 flex-shrink-0">{String(f.at || '').slice(5, 16)}</span>
                   <span className="flex-shrink-0">{{ event: '👀', decision: '🧠', purchase: '💰', learning: '🔁' }[f.kind] || '•'}</span>
                   <span className="text-slate-300 truncate">{f.name ? `${f.name}: ` : ''}{String(f.what || '').replaceAll('_', ' ')}</span>
+                  {f.simulated && <span className="text-[10px] px-1.5 rounded bg-white/10 text-slate-500 flex-shrink-0">simulated</span>}
                 </div>
               ))}
             </div>

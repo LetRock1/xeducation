@@ -36,6 +36,61 @@ learner on the website ──► 1 WATCH   every event (video, pricing, cart, ch
                               └──────────────► back to 2
 ```
 
+## 2b. The learners: one pool, and the simulated ones keep living (v6.3)
+
+The CRM has **one pool of learners** and treats everyone in it the same way: every learner is
+scored, gets decisions, e-mails, coupons and calls, and feeds the learning loop.
+
+* **People who sign up themselves** on the website (you, a friend, the examiner).
+* **Simulated learners** (`…@demo.xeducation.test`): the 2,000 people of the six-month starting
+  history, plus about 13 new ones a day. A CRM is normally switched on inside a business that
+  already has leads; this project has no company behind it, so the simulated learners are that
+  business. They carry a small "simulated" tag and can be filtered, nothing more.
+
+While the servers run, the simulated learners **keep living** (`ml/live_simulation.py`, started by
+the user-backend every 10 seconds):
+
+* they use the website through **its own API over HTTP**, with the requests a browser sends: start a
+  visit, each page and its seconds, video, pricing, brochure, chat, webinar, wishlist, cart,
+  checkout, enquiry, the button in an e-mail, payment, sign-up with the code from their inbox. The
+  CRM has no special code for them;
+* they react to what the CRM **really does**: the e-mails it sends them (clicked or not), the coupons
+  (used at checkout), the calls and WhatsApp messages (made by a simulated advisor, because their
+  phone numbers are fake);
+* they behave as the **documented simulator** of the history (table below); the 2,000 are re-created
+  exactly from the history's seed, so the live data continues the history at the same pace (tested:
+  7.4 purchases a day expected vs 7.2 in the history's last 30 days);
+* **real time**: a second is a second. When the servers are off nobody can use the website, so
+  nothing happens then, and nothing is caught up afterwards;
+* the **hidden** part of each person (intent, luck, how they react to each step) is kept in the
+  simulator's own database (`user-backend/simulation_world.db`); the CRM never reads it. The CRM sees
+  only what any CRM sees: sign-ups, pages, clicks, purchases;
+* nothing reaches a real person: their e-mails end in the reserved `.test` domain (recorded, never
+  delivered) and their phone numbers are `+91 00000 …`.
+
+| What the simulator decides | How (documented) |
+|---|---|
+| Who they are | profile, hidden intent and luck from `ml/generate_dataset.py`; how much each CRM step changes their chance to buy: `TRUE_EFFECTS` in `ml/nba_simulation.py` plus a personal deviation |
+| Coming back | chance per day sig(−2.6 + 0.7·intent − 0.05·days away + boost), within 21 days of the last visit; a call that reached them adds 0.5 for two days, a WhatsApp 0.3; a click in an e-mail brings them back a minute later |
+| On the website | 1 + Poisson pages, log-normal seconds per page; each first-time step (video, pricing, testimonials, brochure, chat, webinar, wishlist, cart, checkout, enquiry) with its own chance (`EVENTS` in `ml/generate_history.py`) |
+| E-mails | clicked with chance sig(−1.7 + 0.6·intent, +0.4 with a coupon), 12 minutes to 30 hours after sending |
+| Buying | the generator's buying formula on everything they have done, plus the strongest effect of a CRM step in the last 14 days; spread over the day (daily chance 1 − (1 − p14)^(1/14)); only within 14 days of a visit; they pay with their best valid coupon |
+| Calls and WhatsApp | a simulated advisor does their tasks 1–24 hours after the CRM creates them (reached 60%, no answer 30%, not interested 10%) unless you record an outcome first. It has its own daily call capacity (real people never lose a call slot to a simulated learner) and is refused for real people's tasks |
+| New sign-ups | about 13 a day: sign-up → code from their inbox → profile → first visit |
+
+**Dashboard → Simulated learners, live** shows what they did in the last 24 hours and their latest
+steps, has **Send a learner to the website now** (one learner who is still deciding comes back
+immediately; what they do there is drawn as usual) and **New sign-up now**, and can pause them.
+`crm_settings.json` → `live_simulation` switches them off or changes the sign-ups per day and the
+advisor's hours. `tests/test_live_simulation.py` checks all of it on a private copy of the website
+and database.
+
+**What this shows, and what it does not.** It shows the CRM working end to end, in real time, on a
+stream of learners whose true behaviour is known — so we can check that its decisions and its
+learning loop do the right thing. Numbers measured on simulated learners (purchases, impact, A/B
+verdicts) describe the simulator, not a real market; the claims about real markets come from the two
+real datasets (section 11). People who sign up themselves go through exactly the same code.
+
 ## 3. The lead score
 
 * **Base model** (`ml/train_model.py`): trained once on 60,000 **simulated** leads
@@ -62,14 +117,32 @@ learner on the website ──► 1 WATCH   every event (video, pricing, cart, ch
   how this business differs — a recalibration and a correction for 13 website signals — from the
   CRM's own outcomes (section 5). The score is the chance to buy within 14 days **if nobody contacts
   the lead now**.
-* **Why this score?** shows each reason in points, computed by the model for that lead.
+* **Time since the last visit** (v6.2): the learning loop also learns how much being away 1–7,
+  7–14, 14–30 or 30+ days lowers the chance to buy (in the sandbox history: about 0, −0.5, −1.4 and
+  −1.7 on the log-odds scale). The score applies it, so a lead that goes quiet drops by itself. This
+  replaced the old hand-written "lead decay" rule, which moved every quiet lead one tier down and
+  capped its score at the top of that tier (59.9, 79.9, 39.9): that is why so many leads used to show
+  exactly the same score.
+* **Always current** (v6.2): every lead is re-scored by the current model at start-up, every few
+  minutes (`score_refresh_minutes`) and right after the learning loop switches models
+  (`scoring.refresh_scores`, one batch for everyone, under a second for 2,000 people). There is no
+  "Re-score" button any more.
+* **Customers** (v6.2): no score floor any more. A buyer is shown as a customer (what they bought,
+  when, what they paid), not as a chance to buy; the CRM does not offer them the course they own.
+* **E-mail clicks never lower a score** (v6.2): the base model counts clicks as interest, but the
+  loop learns a negative correction for them, because people who keep getting follow-ups without
+  buying stay in its data longer and pile up clicks. That is an artefact of how often the CRM writes
+  to someone, so the score treats a click as worth at least nothing.
+* **Why this score?** shows each reason in points, worked out by the current model when the tab is
+  opened (including time since the last visit).
 
 ## 4. Next-best-action (`user-backend/nba_core.py`, `nba.py`, `playbook.py`)
 
 At each trigger an uplift model estimates the chance to buy under every step — nothing, information
 e-mail, 10% or 20% coupon, advisor call, WhatsApp — and picks the one with the highest **extra
-profit** (price × extra chance − discount − cost), or nothing. Consent, the daily call capacity and
-per-trigger rules are enforced, and blocked options are shown with the reason. The model is
+profit** (price × extra chance − discount − cost), or nothing. Consent, the daily call capacity (20
+calls a day for the team; the simulated advisor has 20 of its own) and per-trigger rules are
+enforced, and blocked options are shown with the reason. The model is
 anchored so that "nothing" equals the lead's score. 15% of decisions are random and every decision is
 stored with its probability, the lead's data at that moment and the model version, so policies can
 be compared honestly later (inverse-propensity weighting).
@@ -185,9 +258,33 @@ control-group people per history is few.
 
 For one lead: every step the team can take now → how learners in the same lifecycle stage reacted
 to that step in the next 3 days (from history, weighted by 1/probability) → the best next step after
-each reaction, re-scored with the lead's own models; a two-step look-ahead on expected profit, with
-a third step along the best branch. The **Journeys** page shows the lifecycle funnel, the flow graph
-stage → step → reaction → outcome, the top converting paths and what each step adds at each stage.
+each reaction, re-scored with the lead's own models. Since v6.2 the first step uses **the same
+calculation as the Recommended action tab and every automatic decision** (`nba.evaluate`): the same
+chance for each step, the same rules (consent, call capacity, no 20% coupon for customers) and the
+same pick (highest extra profit now), so the two tabs can no longer disagree. When there are fewer
+than 30 past decisions for a stage and step, the page says so instead of showing a guessed reaction
+mix; customers get no paths. Each step has a **Do it now** button (see section 4b). The **Journeys**
+page shows the lifecycle funnel, the flow graph stage → step → reaction → outcome, the top
+converting paths and what each step adds at each stage.
+
+## 4b. On the lead page: the recommendation now, Do it now, and what happened (v6.2)
+
+* **Recommended action** works the decision out for the learner as they are *now* (behaviour, time
+  away, current models) and shows the full receipt: for every step the chance to buy within 14 days,
+  the change against doing nothing, the extra profit, and why a step is not allowed.
+* **Do it now** carries a step out through the same code as an automatic decision (the e-mail with
+  or without coupon is sent; a call or WhatsApp becomes a task in Today's actions). It is logged as a
+  decision with policy `manual`, so the learning loop is told about it, but it is kept out of the
+  uplift model's training and the journey statistics (it was not drawn by the logging policy).
+  People in the 5% control group cannot be contacted this way.
+* **What the CRM has done so far** lists every decision with its receipt (random pick or the model's
+  pick), the e-mail and whether it was clicked, the call outcome, the next visit, and whether they
+  bought within 14 days. Campaigns and A/B tests the person was part of are listed too.
+* **E-mail links** (v6.2): the "View Course" button opens the course the person looked at, on the
+  website itself (`/courses/<slug>?ref=<token>`). The page reports the click (`POST /api/email/click`),
+  logged in or not, so it is tied to that exact e-mail. With `PUBLIC_SITE_URL=http://<laptop-ip>:5173`
+  in both `.env` files, the links also open on a phone on the same Wi-Fi. Unsubscribe links go to
+  `/unsubscribe` on the website. Links in older e-mails (to the marketing backend) still work.
 
 Check (`ml/results/paths_check.md`, learned before a cut-off date, tested after it): the predicted chance to buy is calibrated
 overall (38.7% predicted vs 39.2% actual) but less so per step — after "do nothing" it predicted
@@ -198,9 +295,12 @@ The paths are a planning aid for the sales team, not a research claim.
 
 ## 9. Pipeline board
 
-Every lead in its lifecycle stage — Lead, Engaged, MQL, SQL, Customer — worked out from behaviour
-(SQL: enquiry, cart or checkout; MQL: pricing, wishlist or chat; Engaged: content or a second
-visit; Customer: a purchase), with the expected value of each column. The team can drag a card to
+Every lead in its lifecycle stage — New lead, Engaged, Interested (MQL), Ready to buy (SQL),
+Customer — worked out from behaviour (SQL = sales-qualified: enquiry, cart or checkout; MQL =
+marketing-qualified: pricing, wishlist or chat; Engaged: content or a second visit; Customer: a
+purchase). MQL and SQL are the standard CRM lifecycle names (HubSpot, Salesforce); the dashboard
+shows the plain words first. Each column shows its expected value; everyone is on the board
+(untick "include simulated learners" to see only people who signed up themselves). The team can drag a card to
 another stage; the board remembers it and still shows what the CRM would say ("auto: SQL"). Only a
 purchase makes a Customer.
 
@@ -221,7 +321,8 @@ with freer wording, and any answer whose numbers differ from the data is rejecte
 | X Education leads (Kaggle), 9,240 | checking the modelling method without leakage | real |
 | Hillstrom e-mail experiment, 64,000 customers | next-best-action and learning loop on real randomized data | real |
 | Simulated randomized campaign, 60,000 leads | next-best-action starting knowledge | simulated |
-| Six-month starting history, 2,000 learners | dashboards, learning loop, A/B tests, what-if paths | simulated (marked) |
+| Six-month starting history, 2,000 learners | dashboards, learning loop, A/B tests, what-if paths | simulated (tagged) |
+| The same learners and about 13 new a day, live (section 2b) | the CRM's work in real time: visits, decisions, e-mails, calls, purchases, learning | simulated (tagged) |
 | Your own sign-ups | everything, live | real |
 
 The real file, 5-fold cross-validation × 3 seeds, only the 9 columns a new lead has
@@ -261,7 +362,7 @@ up to 40 times slower on a busy machine.
 |---|---|
 | Sign-up, login, password reset | 6-digit e-mail code (valid 10 minutes, 5 tries, resend after 60 s); every new learner is a CRM lead at once |
 | Profile and Settings | occupation, specialisation, phone; e-mail, call and WhatsApp consent (respected everywhere); password; **Delete my account** |
-| Tracking | visits (a new one after 30 minutes idle), page time, device, traffic source, overview video (after half is watched), pricing and testimonials (after 4 s in view), brochure, chat, webinar seat, wishlist, cart, checkout, enquiry; every event re-scores the lead |
+| Tracking | visits (a new one after 30 minutes idle), page time, device, traffic source, overview video (after half is watched), pricing and testimonials (after 4 s in view), brochure, chat, webinar seat, wishlist, cart, checkout, enquiry; every event re-scores the lead; a "still here" ping every 30 s while the page is really in use, so "visit ended" means the learner left |
 | Course page | details from the catalogue, 35-second overview, printable brochure, reviews (buyers only), questions answered by the team |
 | Wishlist, cart, checkout | catalogue prices only, personal 72-hour coupons, simulated UPI or card payment (test card `4242 4242 4242 4242`, nothing is charged) |
 | Chat assistant | fees, duration, syllabus, refunds, "which course suits me?"; callback requests |
@@ -280,17 +381,18 @@ cool-downs (6 to 24 hours) so nobody is chased twice.
 | Visit ended (a course was viewed) | 1 / 15 minutes idle | all |
 | Enquiry | at once | information or coupon e-mail, call (an e-mail is always sent) |
 
-Leads with no activity drop a tier after 10 minutes (demo) or 7 days (live); customers never do.
+A lead that goes quiet drops by itself: the score includes the time since the last visit (learned
+by the loop, section 3), and every lead is re-scored every 5 minutes (demo) or every hour (live).
 
 **Marketing dashboard** (<http://localhost:5174>)
 
 | Page | What it shows |
 |---|---|
-| Dashboard | people, purchases and revenue, model health (predicted vs actual per tier), next-best-action report, pipeline forecast, campaign influence, CSV export, **Run automations now** |
+| Dashboard | learners (one pool), purchases and revenue; **Simulated learners, live** (last 24 hours, latest steps, **Send a learner to the website now**, **New sign-up now**, **Pause**); model health (predicted vs actual per tier), next-best-action report, pipeline forecast, campaign influence, CSV export, **Run automations now** |
 | Ask the CRM | questions answered from live data, with sources; drafts e-mails and A/B tests (never sends) |
 | Learning loop | "Is the model fooling itself?" (naive vs ours vs actual on the control group), what the loop learned, what our own actions add, the CRM's total impact, "who is fooled?" over time, every run and its reason, live response times, **Retrain now** / **Dry run** |
-| Today's actions | call and WhatsApp tasks ranked by extra profit, with the script; record the outcome |
-| Leads / lead page | one row per person; the lead page has the recommended action (every option compared, blocked ones explained), **What-if paths**, **Why this score?**, e-mail with a coach, WhatsApp, activity, chat and callbacks, personal coupon, attribution; a badge if the lead is in the control group |
+| Today's actions | call and WhatsApp tasks ranked by extra profit, with the script; record the outcome (tasks of simulated learners are done by the simulated advisor unless you record them first; each done task says who did it) |
+| Leads / lead page | one row per person, everyone (filters: everyone, signed up themselves, simulated); the lead page has the recommended action (every option compared, blocked ones explained), **What-if paths**, **Why this score?**, e-mail with a coach, WhatsApp, activity, chat and callbacks, personal coupon, attribution; a badge if the lead is in the control group |
 | Pipeline | lifecycle board with drag-and-drop; Customer only by purchase |
 | Journeys | lifecycle funnel, flow graph, top converting paths, what each step adds by stage |
 | Callbacks | requests from the website chat |

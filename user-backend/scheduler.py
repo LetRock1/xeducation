@@ -25,7 +25,7 @@ COOLDOWN_CART_HOURS = _COOL["cart"]
 COOLDOWN_WISHLIST_HOURS = _COOL["wishlist"]
 # Touchpoints that count for cooldowns. "signup" is not one: creating the CRM
 # contact at signup sends nothing, so it must not block the first follow-up.
-TOUCH_TRIGGERS = ("enquiry", "chat_callback", "cart_abandon", "checkout_abandon", "wishlist", "session_end")
+TOUCH_TRIGGERS = ("enquiry", "chat_callback", "cart_abandon", "checkout_abandon", "wishlist", "session_end", "manual")
 
 # ============================================================
 DEMO_MODE = settings.DEMO_MODE
@@ -134,11 +134,48 @@ def run_all_jobs():
     session_end_job()
 
 
+def refresh_scores_job(reason="scheduled"):
+    """Every lead re-scored with the current model and the time since their last visit (scoring.py)."""
+    try:
+        import scoring
+        scoring.refresh_scores(reason)
+    except Exception as e:
+        print("[SCORES JOB ERROR]", e)
+
+
+def simulation_module():
+    """ml/live_simulation.py: the simulated learners, who keep using the website in real time."""
+    import sys
+    ml_dir = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ml"))
+    if ml_dir not in sys.path:
+        sys.path.insert(0, ml_dir)
+    import live_simulation
+    return live_simulation
+
+
+def simulation_job():
+    try:
+        simulation_module().tick()
+    except Exception as e:
+        print("[SIMULATION ERROR]", e)
+
+
 def start_scheduler():
+    import threading
     import learning
     scheduler.add_job(run_all_jobs, "interval", minutes=JOB_EVERY_MINUTES)
     learn_every = int(settings.S["learning"]["check_every_minutes"][settings.MODE])
     scheduler.add_job(learning.scheduled_job, "interval", minutes=learn_every)
+    refresh_every = int(settings.by_mode("score_refresh_minutes"))
+    scheduler.add_job(refresh_scores_job, "interval", minutes=refresh_every)
+    # once right after start-up: scores saved by an older model are brought up to date by themselves
+    threading.Timer(3.0, refresh_scores_job, args=["startup"]).start()
+    sim = settings.S.get("live_simulation") or {}
+    sim_every = max(3, int(sim.get("tick_seconds", 10)))
+    scheduler.add_job(simulation_job, "interval", seconds=sim_every)   # does nothing while paused
     scheduler.start()
     print(f"[SCHEDULER] Automations every {JOB_EVERY_MINUTES} min; learning loop checks every {learn_every} min "
-          f"(runs when {settings.S['learning']['min_new_outcomes']}+ new outcomes are known)")
+          f"(runs when {settings.S['learning']['min_new_outcomes']}+ new outcomes are known); "
+          f"every lead re-scored every {refresh_every} min and at start-up")
+    print(f"[SIMULATION] Simulated learners {'live' if sim.get('enabled', True) else 'off (crm_settings.json)'}: "
+          f"they keep using the website in real time (checked every {sim_every} s; Dashboard -> Simulated learners)")
